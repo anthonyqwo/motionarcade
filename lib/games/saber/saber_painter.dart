@@ -38,15 +38,16 @@ class SaberPainter extends CustomPainter {
 
     _paintArena(canvas, size);
     _paintAimingLanes(canvas, size);
-    _paintTargets(canvas, size);
+    _paintHitZone(canvas, size, now);
+    _paintTargets(canvas, size, now);
     _paintSwordTipIndicator(canvas, size);
 
     TrailRenderer(
       points: trailPoints,
       now: now,
       sortPoints: false,
-      maxPointsPerPlayer: 48,
-      paintGlow: false,
+      maxPointsPerPlayer: 56,
+      paintGlow: true,
     ).paint(canvas, size);
 
     const ParticlePainter().paint(canvas, particles, now);
@@ -61,77 +62,147 @@ class SaberPainter extends CustomPainter {
     final background = Paint()
       ..shader = LinearGradient(
         colors: [
-          const Color(0xFF0F172A),
           const Color(0xFF030712),
-          const Color(0xFF082F49).withValues(alpha: 0.8),
+          const Color(0xFF111827),
+          const Color(0xFF052E2B),
         ],
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
       ).createShader(rect);
     canvas.drawRect(rect, background);
 
+    final horizonY = size.height * 0.34;
+    final centerX = size.width * 0.5;
+
     final gridPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.05)
+      ..color = Colors.white.withValues(alpha: 0.04)
       ..strokeWidth = 1;
-    for (var i = 1; i < 5; i++) {
-      final y = size.height * i / 5;
+
+    for (var i = 0; i <= 6; i++) {
+      final t = i / 6.0;
+      final y = horizonY + math.pow(t, 1.75) * (size.height - horizonY);
+      gridPaint.color = Colors.white.withValues(alpha: 0.03 + t * 0.07);
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
-    for (var i = 1; i < 7; i++) {
-      final x = size.width * i / 7;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+
+    final railPaint = Paint()
+      ..color = const Color(0xFF22D3EE).withValues(alpha: 0.12)
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+
+    for (final lane in [-1.3, -0.75, -0.35, 0.0, 0.35, 0.75, 1.3]) {
+      final start = Offset(centerX + lane * size.width * 0.035, horizonY);
+      final end = Offset(centerX + lane * size.width * 0.38, size.height);
+      canvas.drawLine(start, end, railPaint);
     }
+
+    final horizonPaint = Paint()
+      ..color = const Color(0xFFFF4EBD).withValues(alpha: 0.15)
+      ..strokeWidth = 1.5
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+    canvas.drawLine(
+      Offset(size.width * 0.12, horizonY),
+      Offset(size.width * 0.88, horizonY),
+      horizonPaint,
+    );
   }
 
   void _paintAimingLanes(Canvas canvas, Size size) {
     final centerX = size.width * 0.5;
-    final centerY = size.height * 0.5;
+    final horizonY = size.height * 0.34;
     final lanePaint = Paint()
-      ..color = Colors.cyan.withValues(alpha: 0.08)
-      ..strokeWidth = 1.5
+      ..color = Colors.cyanAccent.withValues(alpha: 0.09)
+      ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
-    // Draw horizontal reference lines representing Left/Center/Right lanes converging to the horizon
-    for (final lane in [-1.0, 0.0, 1.0]) {
-      final start = Offset(centerX + lane * (size.width * 0.05), centerY);
-      final end = Offset(centerX + lane * (size.width * 0.26), size.height);
+    for (final lane in [-1.0, -0.5, 0.5, 1.0]) {
+      final start = Offset(centerX + lane * (size.width * 0.045), horizonY);
+      final end = Offset(centerX + lane * (size.width * 0.28), size.height);
       canvas.drawLine(start, end, lanePaint);
     }
   }
 
-  void _paintTargets(Canvas canvas, Size size) {
+  void _paintHitZone(Canvas canvas, Size size, DateTime now) {
+    final center = Offset(size.width * 0.5, size.height * 0.57);
+    final rect = Rect.fromCenter(
+      center: center,
+      width: size.width * 0.5,
+      height: size.height * 0.38,
+    );
+    final rrect = RRect.fromRectAndRadius(
+      rect,
+      Radius.circular(size.shortestSide * 0.025),
+    );
+
+    final zonePaint = Paint()
+      ..color = const Color(0xFF22D3EE).withValues(alpha: 0.14)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+    canvas.drawRRect(rrect, zonePaint);
+
+    final tickPaint = Paint()
+      ..color = const Color(0xFFFFF7AD).withValues(alpha: 0.28)
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    final tick = size.shortestSide * 0.035;
+    for (final corner in [
+      rect.topLeft,
+      rect.topRight,
+      rect.bottomLeft,
+      rect.bottomRight,
+    ]) {
+      final sx = corner.dx < center.dx ? 1.0 : -1.0;
+      final sy = corner.dy < center.dy ? 1.0 : -1.0;
+      canvas.drawLine(corner, corner + Offset(tick * sx, 0), tickPaint);
+      canvas.drawLine(corner, corner + Offset(0, tick * sy), tickPaint);
+    }
+
+    final scanProgress = (now.millisecondsSinceEpoch % 1300) / 1300.0;
+    final scanY = rect.top + rect.height * scanProgress;
+    final scanPaint = Paint()
+      ..color = const Color(0xFFFF4EBD).withValues(alpha: 0.18)
+      ..strokeWidth = 1
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawLine(
+      Offset(rect.left + 8, scanY),
+      Offset(rect.right - 8, scanY),
+      scanPaint,
+    );
+  }
+
+  void _paintTargets(Canvas canvas, Size size, DateTime now) {
     final centerX = size.width * 0.5;
     final centerY = size.height * 0.5;
+    final pulse = math.sin(now.millisecondsSinceEpoch / 180.0) * 0.5 + 0.5;
 
     for (final target in targets) {
       final scale = _depth.scaleForDepth(target.depth);
       final opacity = _depth.opacityForDepth(target.depth);
       final center = Offset(
         centerX + target.lane * (size.width * 0.22) * scale,
-        centerY + _depth.yOffsetForDepth(target.depth, size.height * 0.18),
+        centerY +
+            target.row * (size.height * 0.18) * scale +
+            _depth.yOffsetForDepth(target.depth, size.height * 0.18),
       );
 
-      final boxSize = 44.0 * scale;
+      final boxSize = 44.0 * scale * _statusScaleFor(target);
+      final targetOpacity = opacity * _statusOpacityFor(target);
 
-      // Color mapping based on direction
       final Color baseColor = _colorForDirection(target.direction);
 
-      if (!target.isCut) {
-        // Draw uncut target cube
-        final isMissed = target.status == SaberTargetStatus.missed;
-        final borderPaint = Paint()
-          ..color = isMissed
-              ? Colors.redAccent.withValues(alpha: opacity * 0.6)
-              : baseColor.withValues(alpha: opacity * 0.9)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.0 * scale
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 2.0 * scale);
-
-        final fillPaint = Paint()
-          ..color = isMissed
-              ? const Color(0x773F3F46)
-              : const Color(0xBB1E293B).withValues(alpha: opacity * 0.73)
-          ..style = PaintingStyle.fill;
+      if (target.isMissed) {
+        _paintMissedTarget(
+          canvas: canvas,
+          center: center,
+          boxSize: boxSize,
+          scale: scale,
+          opacity: targetOpacity,
+          progress: target.missProgress,
+        );
+      } else if (!target.isCut) {
+        final approach = target.depth.clamp(0.0, 1.0);
+        final hitGlow = _smoothStep(0.68, 0.98, approach);
 
         final rect = Rect.fromCenter(
           center: center,
@@ -143,40 +214,54 @@ class SaberPainter extends CustomPainter {
           Radius.circular(8.0 * scale),
         );
 
+        if (hitGlow > 0.01) {
+          final glowPaint = Paint()
+            ..color = baseColor.withValues(
+              alpha: (0.18 + pulse * 0.08) * hitGlow * targetOpacity,
+            )
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 5.0 * scale
+            ..maskFilter = MaskFilter.blur(BlurStyle.normal, 8.0 * scale);
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              rect.inflate(5.0 * scale * hitGlow),
+              Radius.circular(12.0 * scale),
+            ),
+            glowPaint,
+          );
+        }
+
+        final fillPaint = Paint()
+          ..shader = LinearGradient(
+            colors: [
+              const Color(0xFF111827).withValues(alpha: targetOpacity * 0.88),
+              baseColor.withValues(alpha: targetOpacity * 0.18),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ).createShader(rect)
+          ..style = PaintingStyle.fill;
+
+        final borderPaint = Paint()
+          ..color = baseColor.withValues(alpha: targetOpacity * 0.9)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (2.4 + hitGlow * 1.2) * scale
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 1.8 * scale);
+
         canvas.drawRRect(rrect, fillPaint);
         canvas.drawRRect(rrect, borderPaint);
 
-        if (isMissed) {
-          // Draw an X inside
-          final xPaint = Paint()
-            ..color = Colors.redAccent.withValues(alpha: opacity)
-            ..strokeWidth = 3.5 * scale
-            ..strokeCap = StrokeCap.round;
-          final offset = boxSize * 0.25;
-          canvas.drawLine(
-            center - Offset(offset, offset),
-            center + Offset(offset, offset),
-            xPaint,
-          );
-          canvas.drawLine(
-            center - Offset(-offset, offset),
-            center + Offset(-offset, offset),
-            xPaint,
-          );
-        } else {
-          // Draw directional arrow inside
-          _drawDirectionArrow(
-            canvas,
-            center,
-            boxSize * 0.5,
-            target.direction,
-            baseColor.withValues(alpha: opacity),
-            scale,
-          );
-        }
+        _drawTargetCorners(canvas, rect, baseColor, targetOpacity, scale);
+        _drawDirectionArrow(
+          canvas,
+          center,
+          boxSize * 0.5,
+          target.direction,
+          baseColor.withValues(alpha: targetOpacity),
+          scale,
+        );
       } else {
-        // Draw split halves animation
-        final double separationDistance = target.cutProgress * 28.0 * scale;
+        final double separationDistance = target.cutProgress * 36.0 * scale;
         final Offset separationVector =
             Offset(
               math.cos(target.cutAngle + math.pi / 2),
@@ -184,7 +269,10 @@ class SaberPainter extends CustomPainter {
             ) *
             separationDistance;
 
-        final opacityCut = (1.0 - target.cutProgress).clamp(0.0, 1.0);
+        final opacityCut = math
+            .pow(1.0 - target.cutProgress, 1.4)
+            .clamp(0.0, 1.0)
+            .toDouble();
 
         final fillPaint = Paint()
           ..color = const Color(0xBB1E293B).withValues(alpha: opacityCut * 0.73)
@@ -220,8 +308,120 @@ class SaberPainter extends CustomPainter {
         canvas.drawPath(pathRight, fillPaint);
         canvas.drawPath(pathRight, borderPaint);
         canvas.restore();
+
+        final cutPaint = Paint()
+          ..color = baseColor.withValues(alpha: opacityCut * 0.85)
+          ..strokeWidth = 2.5 * scale
+          ..strokeCap = StrokeCap.round
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4 * scale);
+        final cutVector = Offset(
+          math.cos(target.cutAngle),
+          math.sin(target.cutAngle),
+        );
+        canvas.drawLine(
+          center - cutVector * boxSize * 0.72,
+          center + cutVector * boxSize * 0.72,
+          cutPaint,
+        );
       }
     }
+  }
+
+  double _statusOpacityFor(SaberTarget target) {
+    if (!target.isMissed) {
+      return 1.0;
+    }
+    return math.pow(1.0 - target.missProgress, 1.25).clamp(0.0, 1.0).toDouble();
+  }
+
+  double _statusScaleFor(SaberTarget target) {
+    if (!target.isMissed) {
+      return 1.0;
+    }
+    final pop = math.sin(target.missProgress * math.pi) * 0.18;
+    return 1.0 + pop - target.missProgress * 0.1;
+  }
+
+  void _paintMissedTarget({
+    required Canvas canvas,
+    required Offset center,
+    required double boxSize,
+    required double scale,
+    required double opacity,
+    required double progress,
+  }) {
+    final rect = Rect.fromCenter(
+      center: center,
+      width: boxSize,
+      height: boxSize,
+    );
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(8.0 * scale));
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFF450A0A).withValues(alpha: opacity * 0.34)
+      ..style = PaintingStyle.fill;
+    final borderPaint = Paint()
+      ..color = Colors.redAccent.withValues(alpha: opacity * 0.75)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4 * scale
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 2.5 * scale);
+
+    canvas.drawRRect(rrect, fillPaint);
+    canvas.drawRRect(rrect, borderPaint);
+
+    final ringPaint = Paint()
+      ..color = Colors.redAccent.withValues(alpha: opacity * 0.28)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0 * scale
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 5 * scale);
+    canvas.drawCircle(center, boxSize * (0.55 + progress * 0.45), ringPaint);
+
+    final xPaint = Paint()
+      ..color = Colors.redAccent.withValues(alpha: opacity)
+      ..strokeWidth = 4.0 * scale
+      ..strokeCap = StrokeCap.round;
+    final offset = boxSize * 0.28;
+    canvas.drawLine(
+      center - Offset(offset, offset),
+      center + Offset(offset, offset),
+      xPaint,
+    );
+    canvas.drawLine(
+      center - Offset(-offset, offset),
+      center + Offset(-offset, offset),
+      xPaint,
+    );
+  }
+
+  void _drawTargetCorners(
+    Canvas canvas,
+    Rect rect,
+    Color color,
+    double opacity,
+    double scale,
+  ) {
+    final paint = Paint()
+      ..color = color.withValues(alpha: opacity * 0.55)
+      ..strokeWidth = 1.4 * scale
+      ..strokeCap = StrokeCap.round;
+    final tick = rect.width * 0.17;
+
+    for (final corner in [
+      rect.topLeft,
+      rect.topRight,
+      rect.bottomLeft,
+      rect.bottomRight,
+    ]) {
+      final sx = corner.dx < rect.center.dx ? 1.0 : -1.0;
+      final sy = corner.dy < rect.center.dy ? 1.0 : -1.0;
+      canvas.drawLine(corner, corner + Offset(tick * sx, 0), paint);
+      canvas.drawLine(corner, corner + Offset(0, tick * sy), paint);
+    }
+  }
+
+  double _smoothStep(double edge0, double edge1, double value) {
+    final t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
   }
 
   Path _getPathForHalf(double size, bool isFirstHalf, double cutAngle) {
@@ -328,9 +528,13 @@ class SaberPainter extends CustomPainter {
       case MotionDirection.up || MotionDirection.down:
         return const Color(0xFF22D3EE); // Neon Cyan
       case MotionDirection.left:
-        return const Color(0xFFEF4444); // Neon Red
+        return const Color(0xFFF97316); // Neon Orange
       case MotionDirection.right:
-        return const Color(0xFF3B82F6); // Neon Blue
+        return const Color(0xFFA3E635); // Neon Lime
+      case MotionDirection.forward:
+        return const Color(0xFF22C55E);
+      case MotionDirection.backward:
+        return const Color(0xFFFF4EBD);
       default:
         return Colors.white;
     }

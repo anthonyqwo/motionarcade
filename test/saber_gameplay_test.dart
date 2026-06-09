@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:motionarcade/games/saber/saber_game_state.dart';
@@ -36,6 +37,28 @@ void main() {
       expect(target.cutProgress, closeTo(0.35, 0.01));
     });
 
+    test('missed targets fade out and become removable quickly', () {
+      final target = SaberTarget(
+        id: 't1',
+        direction: MotionDirection.up,
+        lane: 0.0,
+        spawnTime: DateTime.now(),
+        depth: 1.05,
+      );
+
+      target.markMissed();
+      expect(target.depth, equals(1.0));
+      expect(target.missProgress, equals(0.0));
+
+      target.update(0.36, 0.4);
+      expect(target.missProgress, closeTo(0.5, 0.01));
+      expect(target.isFinished, isFalse);
+
+      target.update(0.36, 0.4);
+      expect(target.missProgress, equals(1.0));
+      expect(target.isFinished, isTrue);
+    });
+
     test(
       'SaberGameState spawns targets and handles misses when depth exceeds 1.0',
       () {
@@ -50,7 +73,7 @@ void main() {
         state.update(2.6);
         expect(state.targets, isNotEmpty);
         expect(state.targets.first.status, equals(SaberTargetStatus.active));
-        expect(state.targets.first.depth, closeTo(2.6 * state.speed, 0.001));
+        expect(state.targets.first.depth, equals(0.0));
 
         state.targets.first.depth = 1.05;
         state.update(0.1);
@@ -59,6 +82,33 @@ void main() {
         expect(state.scoring.combo, equals(0));
       },
     );
+
+    test('SaberGameState spawns targets across more than three fixed points', () {
+      final state = SaberGameState(
+        server: mockServer,
+        initialPlayers: players,
+        random: math.Random(4),
+      );
+      addTearDown(state.dispose);
+
+      final positions = <String>{};
+      String? previousPosition;
+
+      for (var i = 0; i < 8; i++) {
+        state.update(1.7);
+        final target = state.targets.last;
+        final position =
+            '${target.lane.toStringAsFixed(2)},${target.row.toStringAsFixed(2)}';
+        positions.add(position);
+        if (previousPosition != null) {
+          expect(position, isNot(previousPosition));
+        }
+        previousPosition = position;
+      }
+
+      expect(positions.length, greaterThan(3));
+      expect(positions.any((position) => !position.endsWith(',0.00')), isTrue);
+    });
 
     test('slash effects only trigger for matching active targets', () async {
       final motionEvents = StreamController<MotionEvent>.broadcast();

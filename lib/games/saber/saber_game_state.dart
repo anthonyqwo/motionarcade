@@ -15,24 +15,41 @@ class SaberGameState extends ChangeNotifier {
     required this.server,
     required List<Player> initialPlayers,
     Stream<MotionEvent>? motionEvents,
-  }) : players = List.from(initialPlayers) {
+    math.Random? random,
+  }) : players = List.from(initialPlayers),
+       _random = random ?? math.Random() {
     _eventSub = server.events.listen(_handleEvent);
     _motionEventSub = motionEvents?.listen(_handleEvent);
   }
+
+  static const List<({double lane, double row})> _spawnPositions = [
+    (lane: -0.95, row: -0.55),
+    (lane: 0.0, row: -0.62),
+    (lane: 0.95, row: -0.55),
+    (lane: -1.1, row: -0.08),
+    (lane: -0.42, row: 0.0),
+    (lane: 0.42, row: 0.0),
+    (lane: 1.1, row: -0.08),
+    (lane: -0.78, row: 0.48),
+    (lane: 0.0, row: 0.55),
+    (lane: 0.78, row: 0.48),
+  ];
 
   final WebSocketServerService server;
   final List<Player> players;
   final List<SaberTarget> targets = [];
   final ScoringSystem scoring = ScoringSystem();
   final TrailPointBuffer _trailBuffer = TrailPointBuffer();
+  final math.Random _random;
 
   StreamSubscription? _eventSub;
   StreamSubscription? _motionEventSub;
-  double speed = 0.38; // depth units per second
+  double speed = 0.48; // depth units per second
   int _targetCounter = 0;
   double _elapsedTime = 0.0;
   double _lastSpawnTime = 0.0;
-  final double _spawnIntervalSeconds = 2.5;
+  final double _spawnIntervalSeconds = 1.65;
+  int? _lastSpawnPositionIndex;
 
   SlashEvent? lastSlash;
   String lastEventLabel = 'none';
@@ -50,20 +67,13 @@ class SaberGameState extends ChangeNotifier {
     final now = DateTime.now();
     bool needsNotify = false;
 
-    // Check if we should spawn a target
-    if (_elapsedTime - _lastSpawnTime >= _spawnIntervalSeconds) {
-      _spawnTarget(now);
-      _lastSpawnTime = _elapsedTime;
-      needsNotify = true;
-    }
-
     // Update targets
     for (final target in List<SaberTarget>.from(targets)) {
       target.update(dt, speed);
 
       // If a target is active and passes depth 1.0 without being hit, it's a Miss!
       if (target.status == SaberTargetStatus.active && target.depth >= 1.0) {
-        target.status = SaberTargetStatus.missed;
+        target.markMissed();
         scoring.registerHit(FeedbackResult.miss);
         needsNotify = true;
 
@@ -77,16 +87,17 @@ class SaberGameState extends ChangeNotifier {
     }
 
     // Clean up targets that are finished animating or missed
-    targets.removeWhere((t) {
-      if (t.isCut && t.cutProgress >= 1.0) return true;
-      if (t.status == SaberTargetStatus.missed &&
-          now.difference(t.spawnTime).inSeconds > 5) {
-        return true;
-      }
-      return false;
-    });
+    targets.removeWhere((t) => t.isFinished);
 
     _trailBuffer.prune(now);
+
+    // Check if we should spawn a target after updating existing targets so new
+    // targets do not jump forward by a whole frame interval.
+    if (_elapsedTime - _lastSpawnTime >= _spawnIntervalSeconds) {
+      _spawnTarget(now);
+      _lastSpawnTime = _elapsedTime;
+      needsNotify = true;
+    }
 
     if (needsNotify) {
       notifyListeners();
@@ -95,7 +106,6 @@ class SaberGameState extends ChangeNotifier {
 
   void _spawnTarget(DateTime now) {
     _targetCounter++;
-    final random = math.Random();
 
     final directions = [
       MotionDirection.up,
@@ -103,16 +113,24 @@ class SaberGameState extends ChangeNotifier {
       MotionDirection.left,
       MotionDirection.right,
     ];
-    final direction = directions[random.nextInt(directions.length)];
+    final direction = directions[_random.nextInt(directions.length)];
 
-    final lanes = [-1.0, 0.0, 1.0];
-    final lane = lanes[random.nextInt(lanes.length)];
+    var positionIndex = _random.nextInt(_spawnPositions.length);
+    final lastIndex = _lastSpawnPositionIndex;
+    if (lastIndex != null &&
+        positionIndex == lastIndex &&
+        _spawnPositions.length > 1) {
+      positionIndex = (positionIndex + 1) % _spawnPositions.length;
+    }
+    _lastSpawnPositionIndex = positionIndex;
+    final position = _spawnPositions[positionIndex];
 
     targets.add(
       SaberTarget(
         id: 'target_$_targetCounter',
         direction: direction,
-        lane: lane,
+        lane: position.lane,
+        row: position.row,
         spawnTime: now,
         depth: 0.0,
       ),
@@ -235,7 +253,7 @@ class SaberGameState extends ChangeNotifier {
           ),
         );
       } else {
-        closestTarget.status = SaberTargetStatus.missed;
+        closestTarget.markMissed();
         scoring.registerHit(FeedbackResult.miss);
 
         server.sendToPlayer(

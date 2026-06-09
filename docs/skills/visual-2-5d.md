@@ -30,6 +30,31 @@ Phase 5
 - Screen shake。
 - HUD 視覺回饋。
 
+## 重要流程：Trail 渲染平滑原則
+
+渲染端可以補「封包內與封包間的小間隔」，但不能補「上游長時間沒有新資料」。如果 trail 每 100-200ms 才收到新點，Catmull-Rom 或 glow 只能讓線段比較漂亮，不能讓手感變即時。因此遇到跳格時要先確認 packet cadence，再調 renderer。
+
+固定流程：
+
+```text
+Host 收到 MotionTrailEvent
+→ normalize 到 host 時間軸
+→ TrailPointBuffer 加入 samples
+→ 定期 prune 過期 points，限制 maxPoints
+→ TrailRenderer 每幀依 frame clock 重畫
+→ 必要時對相鄰 points 做少量 Catmull-Rom interpolation
+→ 依 strength 畫線寬與 glow
+```
+
+渲染規則：
+
+- `TrailPointBuffer` 必須限制 retention 與 maxPoints，避免點數無限成長。
+- `TrailRenderer` 可在相鄰點間隔超過約 24ms 時插入少量補點，但每段補點要有限制。
+- Room preview / Saber arena 若已按時間順序 append points，可關閉排序或限制每位玩家繪製點數。
+- glow、blur、粒子與 screen shake 都會增加 raster 成本；若 packets/s 正常但畫面掉幀，先降這些視覺成本。
+- 劍尖位置指示器用最後一個 trail point 畫，strength 低時也要能顯示穩定位置。
+- 不要用渲染插值掩蓋 streamer cadence 問題；慢速小幅旋轉卡住時，優先檢查 `MotionTrailStreamer` active 判斷。
+
 ## 主要檔案
 
 - [depth_transform.dart](file:///Users/anthonyxwx/code/motionarcade/lib/shared/visual/depth_transform.dart)
@@ -54,6 +79,8 @@ Phase 5
 - [x] 建立 screen shake。
 - [x] 建立基本粒子系統。
 - [x] 支援 20-30Hz motionTrail packets 的平滑插值，避免封包間隔造成斷裂。
+- [x] 渲染端限制 trail point 數量與插值密度，避免 renderer 自己造成卡頓。
+- [x] 明確區分 renderer smoothing 與 streamer cadence；上游資料不足時先修封包節奏。
 
 ## 驗收標準
 
@@ -64,6 +91,7 @@ Phase 5
 - [x] 連續 motion trail 可平滑繪製，不會因封包間隔出現明顯斷裂。
 - [x] 命中時可觸發粒子與畫面震動。
 - [x] HUD 與遊戲物件不互相遮擋。
+- [x] packets/s 正常時，renderer 不應因 trail point 過多或 glow 過重造成掉幀。
 
 ## 測試方式
 
