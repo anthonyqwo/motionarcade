@@ -11,6 +11,8 @@ void main() {
       onSlash: (_) => calls.add('slash'),
       onShootHold: (_) => calls.add('shootHold'),
       onMotionTrail: (_) => calls.add('motionTrail'),
+      onGameCommand: (_) => calls.add('gameCommand'),
+      onRoomState: (_) => calls.add('roomState'),
       onUnknown: (_) => calls.add('unknown'),
     );
 
@@ -52,6 +54,28 @@ void main() {
       ),
     );
     dispatcher.dispatch(
+      GameCommandEvent(
+        playerId: 'p1',
+        timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+        command: GameCommand.startGame,
+        gameId: GameId.motionSaber,
+      ),
+    );
+    dispatcher.dispatch(
+      RoomStateEvent(
+        playerId: 'host',
+        timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+        selectedGame: GameId.motionSaber,
+        availableGames: const [GameId.motionSaber],
+        roomPhase: RoomPhase.lobby,
+        playerScores: const [],
+        connectedPlayers: 1,
+        canStart: true,
+        canRestart: false,
+        canBackToRoom: false,
+      ),
+    );
+    dispatcher.dispatch(
       UnknownMotionEvent(
         type: 'mystery',
         playerId: 'p1',
@@ -66,6 +90,8 @@ void main() {
       'slash',
       'shootHold',
       'motionTrail',
+      'gameCommand',
+      'roomState',
       'unknown',
     ]);
   });

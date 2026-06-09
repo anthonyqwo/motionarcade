@@ -15,6 +15,8 @@ class MotionEventDispatcher {
     this.onMotionTrail,
     this.onFeedback,
     this.onTransportConfig,
+    this.onGameCommand,
+    this.onRoomState,
     this.onUnknown,
   });
 
@@ -29,6 +31,8 @@ class MotionEventDispatcher {
   final MotionEventHandler<MotionTrailEvent>? onMotionTrail;
   final MotionEventHandler<FeedbackEvent>? onFeedback;
   final MotionEventHandler<TransportConfigEvent>? onTransportConfig;
+  final MotionEventHandler<GameCommandEvent>? onGameCommand;
+  final MotionEventHandler<RoomStateEvent>? onRoomState;
   final MotionEventHandler<UnknownMotionEvent>? onUnknown;
 
   void dispatch(MotionEvent event) {
@@ -55,6 +59,10 @@ class MotionEventDispatcher {
         onFeedback?.call(event);
       case TransportConfigEvent():
         onTransportConfig?.call(event);
+      case GameCommandEvent():
+        onGameCommand?.call(event);
+      case RoomStateEvent():
+        onRoomState?.call(event);
       case UnknownMotionEvent():
         onUnknown?.call(event);
     }

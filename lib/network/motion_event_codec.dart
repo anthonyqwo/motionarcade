@@ -102,6 +102,29 @@ class MotionEventCodec {
         trailRateHz: _readInt(json, 'trailRateHz', fallback: 30),
         maxBatchSize: _readInt(json, 'maxBatchSize', fallback: 6),
       ),
+      'gameCommand' => GameCommandEvent(
+        playerId: playerId,
+        timestamp: timestamp,
+        command: _readGameCommand(json['command']),
+        gameId: _readOptionalGameId(json['gameId']),
+        requestId: _readOptionalString(json['requestId']),
+      ),
+      'roomState' => RoomStateEvent(
+        playerId: playerId,
+        timestamp: timestamp,
+        selectedGame: _readGameId(json['selectedGame']),
+        availableGames: _readGameIds(json['availableGames']),
+        roomPhase: _readRoomPhase(json['roomPhase']),
+        playerScores: _readPlayerScores(json['playerScores']),
+        connectedPlayers: _readInt(json, 'connectedPlayers', fallback: 0),
+        canStart: _readBool(json, 'canStart', fallback: false),
+        canRestart: _readBool(json, 'canRestart', fallback: false),
+        canBackToRoom: _readBool(json, 'canBackToRoom', fallback: false),
+        sharedLives: _readInt(json, 'sharedLives', fallback: 0),
+        maxSharedLives: _readInt(json, 'maxSharedLives', fallback: 0),
+        survivedSeconds: _readDouble(json, 'survivedSeconds', fallback: 0),
+        message: _readOptionalString(json['message']),
+      ),
       _ => UnknownMotionEvent(
         type: type,
         playerId: playerId,
@@ -216,5 +239,79 @@ class MotionEventCodec {
       }
     }
     return HapticPattern.light;
+  }
+
+  GameId _readGameId(Object? value) {
+    return _readOptionalGameId(value) ?? GameId.motionSaber;
+  }
+
+  GameId? _readOptionalGameId(Object? value) {
+    if (value is String) {
+      for (final gameId in GameId.values) {
+        if (gameId.name == value) {
+          return gameId;
+        }
+      }
+    }
+    return null;
+  }
+
+  List<GameId> _readGameIds(Object? value) {
+    final values = value is List ? value : const [];
+    final result = <GameId>[];
+    for (final item in values) {
+      final gameId = _readOptionalGameId(item);
+      if (gameId != null) {
+        result.add(gameId);
+      }
+    }
+    return result.isEmpty ? const [GameId.motionSaber] : result;
+  }
+
+  GameCommand _readGameCommand(Object? value) {
+    if (value is String) {
+      for (final command in GameCommand.values) {
+        if (command.name == value) {
+          return command;
+        }
+      }
+    }
+    return GameCommand.startGame;
+  }
+
+  RoomPhase _readRoomPhase(Object? value) {
+    if (value is String) {
+      for (final phase in RoomPhase.values) {
+        if (phase.name == value) {
+          return phase;
+        }
+      }
+    }
+    return RoomPhase.lobby;
+  }
+
+  List<PlayerScoreSnapshot> _readPlayerScores(Object? value) {
+    final values = value is List ? value : const [];
+    return [
+      for (final item in values)
+        if (item is Map<String, Object?>)
+          _readPlayerScore(item)
+        else if (item is Map)
+          _readPlayerScore(Map<String, Object?>.from(item)),
+    ];
+  }
+
+  PlayerScoreSnapshot _readPlayerScore(Map<String, Object?> json) {
+    return PlayerScoreSnapshot(
+      playerId: _readString(json, 'playerId', fallback: 'unknown-player'),
+      name: _readString(json, 'name', fallback: 'Player'),
+      score: _readInt(json, 'score', fallback: 0),
+      combo: _readInt(json, 'combo', fallback: 0),
+      maxCombo: _readInt(json, 'maxCombo', fallback: 0),
+      hits: _readInt(json, 'hits', fallback: 0),
+      misses: _readInt(json, 'misses', fallback: 0),
+      rank: _readInt(json, 'rank', fallback: 0),
+      connected: _readBool(json, 'connected', fallback: true),
+    );
   }
 }

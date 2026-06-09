@@ -280,6 +280,134 @@ class TransportConfigEvent extends MotionEvent {
   }
 }
 
+class GameCommandEvent extends MotionEvent {
+  const GameCommandEvent({
+    required super.playerId,
+    required super.timestamp,
+    required this.command,
+    this.gameId,
+    this.requestId,
+  }) : super(type: 'gameCommand');
+
+  final GameCommand command;
+  final GameId? gameId;
+  final String? requestId;
+
+  @override
+  Map<String, Object?> toJson() {
+    return {
+      'version': version,
+      'type': type,
+      'playerId': playerId,
+      'command': command.name,
+      if (gameId != null) 'gameId': gameId!.name,
+      if (requestId != null) 'requestId': requestId,
+      'timestamp': timestamp.millisecondsSinceEpoch,
+    };
+  }
+}
+
+class RoomStateEvent extends MotionEvent {
+  const RoomStateEvent({
+    required super.playerId,
+    required super.timestamp,
+    required this.selectedGame,
+    required this.availableGames,
+    required this.roomPhase,
+    required this.playerScores,
+    required this.connectedPlayers,
+    required this.canStart,
+    required this.canRestart,
+    required this.canBackToRoom,
+    this.sharedLives = 0,
+    this.maxSharedLives = 0,
+    this.survivedSeconds = 0,
+    this.message,
+  }) : super(type: 'roomState');
+
+  final GameId selectedGame;
+  final List<GameId> availableGames;
+  final RoomPhase roomPhase;
+  final List<PlayerScoreSnapshot> playerScores;
+  final int connectedPlayers;
+  final bool canStart;
+  final bool canRestart;
+  final bool canBackToRoom;
+  final int sharedLives;
+  final int maxSharedLives;
+  final double survivedSeconds;
+  final String? message;
+
+  PlayerScoreSnapshot? scoreForPlayer(String playerId) {
+    for (final score in playerScores) {
+      if (score.playerId == playerId) {
+        return score;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Map<String, Object?> toJson() {
+    return {
+      'version': version,
+      'type': type,
+      'playerId': playerId,
+      'selectedGame': selectedGame.name,
+      'availableGames': availableGames.map((game) => game.name).toList(),
+      'roomPhase': roomPhase.name,
+      'playerScores': playerScores.map((score) => score.toJson()).toList(),
+      'connectedPlayers': connectedPlayers,
+      'canStart': canStart,
+      'canRestart': canRestart,
+      'canBackToRoom': canBackToRoom,
+      'sharedLives': sharedLives,
+      'maxSharedLives': maxSharedLives,
+      'survivedSeconds': survivedSeconds,
+      if (message != null) 'message': message,
+      'timestamp': timestamp.millisecondsSinceEpoch,
+    };
+  }
+}
+
+class PlayerScoreSnapshot {
+  const PlayerScoreSnapshot({
+    required this.playerId,
+    required this.name,
+    required this.score,
+    required this.combo,
+    required this.maxCombo,
+    required this.hits,
+    required this.misses,
+    required this.rank,
+    this.connected = true,
+  });
+
+  final String playerId;
+  final String name;
+  final int score;
+  final int combo;
+  final int maxCombo;
+  final int hits;
+  final int misses;
+  final int rank;
+  final bool connected;
+
+  Map<String, Object?> toJson() {
+    return {
+      'playerId': playerId,
+      'name': name,
+      'score': score,
+      'combo': combo,
+      'maxCombo': maxCombo,
+      'hits': hits,
+      'misses': misses,
+      'rank': rank,
+      'connected': connected,
+    };
+  }
+}
+
 class DisconnectEvent extends MotionEvent {
   const DisconnectEvent({required super.playerId, required super.timestamp})
     : super(type: 'disconnect');
@@ -330,6 +458,12 @@ class NeutralPosition {
 enum FeedbackResult { perfect, good, weak, miss }
 
 enum HapticPattern { light, medium, strong, long, combo, perfect, good, miss }
+
+enum GameId { motionSaber, basketball, pingPong }
+
+enum RoomPhase { lobby, countdown, playing, gameOver }
+
+enum GameCommand { selectGame, startGame, restartGame, backToRoom }
 
 extension MotionEventNormalization on MotionEvent {
   MotionEvent normalized(DateTime now) {
@@ -415,6 +549,31 @@ extension MotionEventNormalization on MotionEvent {
         roomToken: self.roomToken,
         trailRateHz: self.trailRateHz,
         maxBatchSize: self.maxBatchSize,
+      );
+    } else if (self is GameCommandEvent) {
+      return GameCommandEvent(
+        playerId: self.playerId,
+        timestamp: now,
+        command: self.command,
+        gameId: self.gameId,
+        requestId: self.requestId,
+      );
+    } else if (self is RoomStateEvent) {
+      return RoomStateEvent(
+        playerId: self.playerId,
+        timestamp: now,
+        selectedGame: self.selectedGame,
+        availableGames: self.availableGames,
+        roomPhase: self.roomPhase,
+        playerScores: self.playerScores,
+        connectedPlayers: self.connectedPlayers,
+        canStart: self.canStart,
+        canRestart: self.canRestart,
+        canBackToRoom: self.canBackToRoom,
+        sharedLives: self.sharedLives,
+        maxSharedLives: self.maxSharedLives,
+        survivedSeconds: self.survivedSeconds,
+        message: self.message,
       );
     }
     return this;

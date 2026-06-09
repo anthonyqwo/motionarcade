@@ -59,6 +59,7 @@ class _RoomPageState extends State<RoomPage> {
   DateTime? _lastWebSocketTrailPacketAt;
   double? _udpAverageArrivalGapMs;
   double? _webSocketAverageArrivalGapMs;
+  GameId _selectedGame = GameId.motionSaber;
 
   MotionDirection _targetDirection = MotionDirection.up;
   Timer? _targetDirectionTimer;
@@ -158,9 +159,18 @@ class _RoomPageState extends State<RoomPage> {
       onDisconnect: _handleDisconnect,
       onSlash: _handleSlash,
       onMotionTrail: _handleMotionTrail,
+      onGameCommand: _handleGameCommand,
     );
 
     if (event is MotionTrailEvent) {
+      dispatcher.dispatch(event);
+    } else if (event is GameCommandEvent) {
+      setState(() {
+        _eventLog.insert(0, '${event.command.name} from ${event.playerId}');
+        if (_eventLog.length > 8) {
+          _eventLog.removeLast();
+        }
+      });
       dispatcher.dispatch(event);
     } else {
       setState(() {
@@ -230,6 +240,55 @@ class _RoomPageState extends State<RoomPage> {
       _players[existingIndex] = player;
     }
     _sendTransportConfig(event.playerId);
+    _sendRoomStateToPlayer(event.playerId);
+    _broadcastRoomState();
+  }
+
+  int get _connectedPlayersCount => _players
+      .where((player) => player.status == PlayerConnectionStatus.connected)
+      .length;
+
+  RoomStateEvent _buildRoomState({String? message}) {
+    final scores = [
+      for (var i = 0; i < _players.length; i++)
+        PlayerScoreSnapshot(
+          playerId: _players[i].id,
+          name: _players[i].name,
+          score: 0,
+          combo: 0,
+          maxCombo: 0,
+          hits: 0,
+          misses: 0,
+          rank: i + 1,
+          connected: _players[i].status == PlayerConnectionStatus.connected,
+        ),
+    ];
+
+    return RoomStateEvent(
+      playerId: 'host',
+      timestamp: DateTime.now(),
+      selectedGame: _selectedGame,
+      availableGames: GameId.values,
+      roomPhase: RoomPhase.lobby,
+      playerScores: scores,
+      connectedPlayers: _connectedPlayersCount,
+      canStart:
+          _connectedPlayersCount > 0 && _selectedGame == GameId.motionSaber,
+      canRestart: false,
+      canBackToRoom: false,
+      sharedLives: 3,
+      maxSharedLives: 3,
+      survivedSeconds: 0,
+      message: message,
+    );
+  }
+
+  void _broadcastRoomState({String? message}) {
+    _server.broadcast(_buildRoomState(message: message));
+  }
+
+  void _sendRoomStateToPlayer(String playerId, {String? message}) {
+    _server.sendToPlayer(playerId, _buildRoomState(message: message));
   }
 
   void _sendTransportConfig(String playerId) {
@@ -270,10 +329,55 @@ class _RoomPageState extends State<RoomPage> {
           backgroundColor: Colors.orange,
         ),
       );
+      _broadcastRoomState();
+    }
+  }
+
+  void _handleGameCommand(GameCommandEvent event) {
+    switch (event.command) {
+      case GameCommand.selectGame:
+        final gameId = event.gameId;
+        if (gameId == null) {
+          _sendRoomStateToPlayer(event.playerId, message: 'No game selected.');
+          return;
+        }
+        setState(() {
+          _selectedGame = gameId;
+        });
+        _broadcastRoomState(message: '${_gameLabel(gameId)} selected.');
+      case GameCommand.startGame:
+        if (_selectedGame != GameId.motionSaber) {
+          _broadcastRoomState(
+            message: '${_gameLabel(_selectedGame)} is planned next.',
+          );
+          return;
+        }
+        if (_connectedPlayersCount == 0) {
+          _sendRoomStateToPlayer(
+            event.playerId,
+            message: 'Connect at least one player first.',
+          );
+          return;
+        }
+        _startGame();
+      case GameCommand.restartGame:
+        _sendRoomStateToPlayer(
+          event.playerId,
+          message: 'Start a game before restarting.',
+        );
+      case GameCommand.backToRoom:
+        _broadcastRoomState(message: 'Already in room.');
     }
   }
 
   void _startGame() {
+    if (_selectedGame != GameId.motionSaber) {
+      _broadcastRoomState(
+        message: '${_gameLabel(_selectedGame)} is planned next.',
+      );
+      return;
+    }
+
     _eventSubscription?.cancel();
     _udpEventSubscription?.cancel();
     _eventSubscription = null;
@@ -300,6 +404,7 @@ class _RoomPageState extends State<RoomPage> {
               _handleEvent(event);
             });
           });
+          _broadcastRoomState(message: 'Back in room.');
         });
   }
 
@@ -432,6 +537,35 @@ class _RoomPageState extends State<RoomPage> {
               ),
             ),
             const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.sports_esports,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Selected game: ${_gameLabel(_selectedGame)}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      'Phone control ready',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -444,7 +578,7 @@ class _RoomPageState extends State<RoomPage> {
                 ))
                   FilledButton.icon(
                     icon: const Icon(Icons.play_arrow),
-                    label: const Text('Start Motion Saber'),
+                    label: Text('Start ${_shortGameLabel(_selectedGame)}'),
                     onPressed: _startGame,
                   ),
               ],
@@ -568,6 +702,22 @@ class _RoomPageState extends State<RoomPage> {
       ),
     );
   }
+}
+
+String _gameLabel(GameId gameId) {
+  return switch (gameId) {
+    GameId.motionSaber => 'Motion Saber',
+    GameId.basketball => 'Basketball',
+    GameId.pingPong => 'Ping Pong',
+  };
+}
+
+String _shortGameLabel(GameId gameId) {
+  return switch (gameId) {
+    GameId.motionSaber => 'Saber',
+    GameId.basketball => 'Basketball',
+    GameId.pingPong => 'Ping Pong',
+  };
 }
 
 class _TrailDiagnosticsCard extends StatelessWidget {

@@ -30,30 +30,40 @@ void main() {
     expect(find.text('Phone Controller'), findsOneWidget);
     expect(find.text('Server URI'), findsOneWidget);
     expect(find.text('Scan room QR'), findsOneWidget);
+    expect(find.text('Room'), findsOneWidget);
+    expect(find.text('Game Control'), findsOneWidget);
 
-    await tester.scrollUntilVisible(
-      find.text('Fused Motion'),
-      120,
-      scrollable: find.byWidgetPredicate(
-        (widget) =>
-            widget is Scrollable && widget.axisDirection == AxisDirection.down,
-      ),
-    );
-    await tester.pumpAndSettle();
+    final controllerList = find.byKey(const ValueKey('controllerHomeList'));
 
-    expect(find.text('Fused Motion'), findsOneWidget);
+    Future<void> dragUntilVisible(String text, Finder list) async {
+      for (var i = 0; i < 8 && find.text(text).evaluate().isEmpty; i++) {
+        await tester.drag(list, const Offset(0, -320));
+        await tester.pumpAndSettle();
+      }
+    }
 
-    await tester.scrollUntilVisible(
-      find.text('Sensitivity'),
-      120,
-      scrollable: find.byWidgetPredicate(
-        (widget) =>
-            widget is Scrollable && widget.axisDirection == AxisDirection.down,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await dragUntilVisible('Score', controllerList);
+    expect(find.text('Score'), findsWidgets);
 
-    expect(find.text('Sensitivity'), findsOneWidget);
+    await dragUntilVisible('Motion Readiness', controllerList);
+
+    expect(find.text('Motion Readiness'), findsOneWidget);
     expect(find.text('Med'), findsOneWidget);
+
+    await dragUntilVisible('Open debug panel', controllerList);
+
+    await tester.tap(find.text('Open debug panel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Controller Debug'), findsOneWidget);
+    expect(find.text('Fused Motion'), findsOneWidget);
+    final debugList = find.byKey(const ValueKey('controllerDebugList'));
+
+    await dragUntilVisible('Sensor Debug', debugList);
+    expect(find.text('Sensor Debug'), findsOneWidget);
+
+    await dragUntilVisible('Haptic Simulator', debugList);
+
+    expect(find.text('Haptic Simulator'), findsOneWidget);
   });
 }

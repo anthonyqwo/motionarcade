@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../../network/websocket_server_service.dart';
@@ -29,6 +31,7 @@ class _SaberGamePageState extends State<SaberGamePage>
     with SingleTickerProviderStateMixin {
   late final SaberGameState _state;
   late final Ticker _ticker;
+  StreamSubscription<MotionEvent>? _commandSubscription;
   Duration _lastElapsed = Duration.zero;
 
   final ScreenShakeController _shakeController = ScreenShakeController();
@@ -39,6 +42,7 @@ class _SaberGamePageState extends State<SaberGamePage>
   );
   Size _arenaSize = const Size(800, 450);
   bool? _resetNextTick;
+  DateTime? _lastRoomStateBroadcastAt;
 
   @override
   void initState() {
@@ -49,6 +53,7 @@ class _SaberGamePageState extends State<SaberGamePage>
       motionEvents: widget.motionEvents,
     );
     _state.addListener(_onStateChange);
+    _commandSubscription = widget.server.events.listen(_handleCommandEvent);
 
     _ticker = createTicker((elapsed) {
       if (_resetNextTick == true) {
@@ -65,11 +70,13 @@ class _SaberGamePageState extends State<SaberGamePage>
       _frameClock.value = now;
     });
     _ticker.start();
+    _broadcastRoomState(force: true);
   }
 
   @override
   void dispose() {
     _ticker.dispose();
+    unawaited(_commandSubscription?.cancel());
     _state.removeListener(_onStateChange);
     _state.dispose();
     _frameClock.dispose();
@@ -109,6 +116,7 @@ class _SaberGamePageState extends State<SaberGamePage>
     if (mounted) {
       setState(() {});
     }
+    _broadcastRoomState(force: _state.isGameOver);
   }
 
   void _restartRun() {
@@ -117,6 +125,84 @@ class _SaberGamePageState extends State<SaberGamePage>
     _resetNextTick = true;
     _state.restartRun();
     _frameClock.value = DateTime.now();
+    _broadcastRoomState(force: true);
+  }
+
+  void _handleCommandEvent(MotionEvent event) {
+    if (event is! GameCommandEvent) {
+      return;
+    }
+
+    switch (event.command) {
+      case GameCommand.restartGame:
+        if (event.gameId == null || event.gameId == GameId.motionSaber) {
+          _restartRun();
+        }
+      case GameCommand.backToRoom:
+        _broadcastRoomState(force: true, message: 'Returning to room.');
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      case GameCommand.startGame:
+      case GameCommand.selectGame:
+        _broadcastRoomState(force: true);
+    }
+  }
+
+  void _broadcastRoomState({bool force = false, String? message}) {
+    final now = DateTime.now();
+    final lastBroadcast = _lastRoomStateBroadcastAt;
+    if (!force &&
+        lastBroadcast != null &&
+        now.difference(lastBroadcast).inMilliseconds < 250) {
+      return;
+    }
+    _lastRoomStateBroadcastAt = now;
+
+    widget.server.broadcast(
+      RoomStateEvent(
+        playerId: 'host',
+        timestamp: now,
+        selectedGame: GameId.motionSaber,
+        availableGames: GameId.values,
+        roomPhase: switch (_state.phase) {
+          SaberRunPhase.countdown => RoomPhase.countdown,
+          SaberRunPhase.playing => RoomPhase.playing,
+          SaberRunPhase.gameOver => RoomPhase.gameOver,
+        },
+        playerScores: _scoreSnapshots(),
+        connectedPlayers: _state.players
+            .where(
+              (player) => player.status == PlayerConnectionStatus.connected,
+            )
+            .length,
+        canStart: false,
+        canRestart: true,
+        canBackToRoom: true,
+        sharedLives: _state.sharedLives,
+        maxSharedLives: _state.maxSharedLives,
+        survivedSeconds: _state.survivedSeconds,
+        message: message,
+      ),
+    );
+  }
+
+  List<PlayerScoreSnapshot> _scoreSnapshots() {
+    final stats = _state.playerStats;
+    return [
+      for (var i = 0; i < stats.length; i++)
+        PlayerScoreSnapshot(
+          playerId: stats[i].player.id,
+          name: stats[i].player.name,
+          score: stats[i].score,
+          combo: stats[i].combo,
+          maxCombo: stats[i].maxCombo,
+          hits: stats[i].hits,
+          misses: stats[i].misses,
+          rank: i + 1,
+          connected: stats[i].player.status == PlayerConnectionStatus.connected,
+        ),
+    ];
   }
 
   @override

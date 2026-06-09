@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,16 +11,13 @@ import '../shared/models/fused_motion_sample.dart';
 import '../shared/models/motion_event.dart';
 import '../shared/models/sensor_sample.dart';
 import 'calibration_service.dart';
-import 'fused_motion_debug_panel.dart';
 import 'fused_motion_service.dart';
 import 'haptic_feedback_service.dart';
 import 'motion_detector.dart';
 import 'motion_sensor_service.dart';
 import 'motion_trail_streamer.dart';
-import '../shared/visual/pulsing_dot.dart';
+import 'controller_debug_page.dart';
 import 'qr_scan_page.dart';
-import 'recent_motion_events_panel.dart';
-import 'sensor_debug_panel.dart';
 import 'sensitivity_settings.dart';
 
 class ControllerHomePage extends StatefulWidget {
@@ -84,6 +80,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   FusedMotionSnapshot _fusedMotionSnapshot = const FusedMotionSnapshot();
   MotionDetectionResult? _lastMotion;
   final List<MotionDetectionResult> _recentMotionEvents = [];
+  RoomStateEvent? _roomState;
   SensitivityLevel _sensitivityLevel = SensitivityLevel.medium;
   bool _isCalibrated = false;
   String _lastEvent = 'None';
@@ -333,6 +330,11 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       });
     } else if (event is TransportConfigEvent) {
       unawaited(_connectUdpTransport(event));
+    } else if (event is RoomStateEvent) {
+      if (!mounted) return;
+      setState(() {
+        _roomState = event;
+      });
     }
   }
 
@@ -363,6 +365,47 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       if (!mounted) return;
       setState(() => _errorMessage = error.toString());
     }
+  }
+
+  void _sendGameCommand(GameCommand command, {GameId? gameId}) {
+    if (_status != ConnectionStatus.connected) {
+      setState(() => _errorMessage = 'Connect to a room first.');
+      return;
+    }
+
+    _send(
+      GameCommandEvent(
+        playerId: _playerId,
+        timestamp: DateTime.now(),
+        command: command,
+        gameId: gameId,
+        requestId: DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+      ),
+    );
+  }
+
+  void _openDebugPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ControllerDebugPage(
+          status: _status,
+          lastEvent: _lastEvent,
+          lastMotion: _lastMotion,
+          sensorSnapshot: _sensorSnapshot,
+          fusedMotionSnapshot: _fusedMotionSnapshot,
+          recentMotionEvents: List<MotionDetectionResult>.from(
+            _recentMotionEvents,
+          ),
+          trailTransport: _udpClient.isConnected ? 'UDP' : 'WebSocket',
+          udpTrailPacketsPerSecond: _udpTrailPacketsPerSecond,
+          webSocketTrailPacketsPerSecond: _webSocketTrailPacketsPerSecond,
+          trailSamplesPerSecond: _trailSamplesPerSecond,
+          onSendTestEvent: _status == ConnectionStatus.connected
+              ? _sendTestButton
+              : null,
+        ),
+      ),
+    );
   }
 
   void _toggleSensors() {
@@ -405,6 +448,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
           children: [
             Positioned.fill(
               child: ListView(
+                key: const ValueKey('controllerHomeList'),
                 padding: const EdgeInsets.all(20),
                 children: [
                   Text(
@@ -482,57 +526,46 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     ),
                   ],
                   const SizedBox(height: 24),
-                  _ControllerStatusGrid(
-                    status: _status,
-                    lastEvent: _lastEvent,
-                    lastMotion: _lastMotion,
+                  _RoomStatusCard(status: _status, roomState: _roomState),
+                  const SizedBox(height: 12),
+                  _GameControlsCard(
+                    roomState: _roomState,
+                    isConnected: isConnected,
+                    onSelectGame: (gameId) => _sendGameCommand(
+                      GameCommand.selectGame,
+                      gameId: gameId,
+                    ),
+                    onStart: () => _sendGameCommand(
+                      GameCommand.startGame,
+                      gameId: _roomState?.selectedGame ?? GameId.motionSaber,
+                    ),
+                    onRestart: () => _sendGameCommand(
+                      GameCommand.restartGame,
+                      gameId: _roomState?.selectedGame ?? GameId.motionSaber,
+                    ),
+                    onBackToRoom: () => _sendGameCommand(
+                      GameCommand.backToRoom,
+                      gameId: _roomState?.selectedGame ?? GameId.motionSaber,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _PlayerScoreCard(roomState: _roomState, playerId: _playerId),
+                  const SizedBox(height: 12),
+                  _MotionReadinessCard(
                     isMotionActive: _isMotionActive,
-                    trailTransport: _udpClient.isConnected
-                        ? 'UDP'
-                        : 'WebSocket',
-                    udpTrailPacketsPerSecond: _udpTrailPacketsPerSecond,
-                    webSocketTrailPacketsPerSecond:
-                        _webSocketTrailPacketsPerSecond,
-                    trailSamplesPerSecond: _trailSamplesPerSecond,
-                  ),
-                  const SizedBox(height: 24),
-                  FusedMotionDebugPanel(snapshot: _fusedMotionSnapshot),
-                  const SizedBox(height: 12),
-                  SensorDebugPanel(snapshot: _sensorSnapshot),
-                  const SizedBox(height: 12),
-                  FilledButton.tonalIcon(
-                    icon: Icon(
-                      _isMotionActive ? Icons.sensors_off : Icons.sensors,
-                    ),
-                    label: Text(
-                      _isMotionActive ? 'Stop motion' : 'Start motion',
-                    ),
-                    onPressed: _toggleSensors,
-                  ),
-                  const SizedBox(height: 24),
-                  _SensitivityControl(
+                    isCalibrated: _isCalibrated,
                     level: _sensitivityLevel,
                     settings: SensitivitySettings.forLevel(_sensitivityLevel),
                     onChanged: _setSensitivity,
-                  ),
-                  const SizedBox(height: 24),
-                  RecentMotionEventsPanel(events: _recentMotionEvents),
-                  const SizedBox(height: 24),
-                  _CalibrationStatusCard(isCalibrated: _isCalibrated),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.send_outlined),
-                    label: const Text('Send test event'),
-                    onPressed: isConnected ? _sendTestButton : null,
+                    onToggleSensors: _toggleSensors,
+                    onCalibrateGrip: _calibrateGrip,
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.center_focus_strong),
-                    label: const Text('Calibrate grip'),
-                    onPressed: _calibrateGrip,
+                    icon: const Icon(Icons.bug_report_outlined),
+                    label: const Text('Open debug panel'),
+                    onPressed: _openDebugPage,
                   ),
-                  const SizedBox(height: 24),
-                  const _HapticSimulatorPanel(),
                 ],
               ),
             ),
@@ -550,10 +583,351 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   }
 }
 
-class _CalibrationStatusCard extends StatelessWidget {
-  const _CalibrationStatusCard({required this.isCalibrated});
+String _gameLabel(GameId gameId) {
+  return switch (gameId) {
+    GameId.motionSaber => 'Motion Saber',
+    GameId.basketball => 'Basketball',
+    GameId.pingPong => 'Ping Pong',
+  };
+}
 
+String _shortGameLabel(GameId gameId) {
+  return switch (gameId) {
+    GameId.motionSaber => 'Saber',
+    GameId.basketball => 'Basket',
+    GameId.pingPong => 'Pong',
+  };
+}
+
+IconData _gameIcon(GameId gameId) {
+  return switch (gameId) {
+    GameId.motionSaber => Icons.flash_on,
+    GameId.basketball => Icons.sports_basketball,
+    GameId.pingPong => Icons.sports_tennis,
+  };
+}
+
+String _phaseLabel(RoomPhase? phase) {
+  return switch (phase) {
+    RoomPhase.lobby => 'Lobby',
+    RoomPhase.countdown => 'Countdown',
+    RoomPhase.playing => 'Playing',
+    RoomPhase.gameOver => 'Game Over',
+    null => 'Not joined',
+  };
+}
+
+String _formatDuration(double seconds) {
+  final wholeSeconds = seconds.floor();
+  final minutes = wholeSeconds ~/ 60;
+  final remainingSeconds = wholeSeconds % 60;
+  return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+class _MetricChip extends StatelessWidget {
+  const _MetricChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Text(
+              value,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RoomStatusCard extends StatelessWidget {
+  const _RoomStatusCard({required this.status, required this.roomState});
+
+  final ConnectionStatus status;
+  final RoomStateEvent? roomState;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = roomState;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.meeting_room, color: theme.colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Room',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(_phaseLabel(state?.roomPhase)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MetricChip(label: 'Connection', value: status.label),
+                _MetricChip(
+                  label: 'Game',
+                  value: _gameLabel(state?.selectedGame ?? GameId.motionSaber),
+                ),
+                _MetricChip(
+                  label: 'Players',
+                  value: '${state?.connectedPlayers ?? 0}',
+                ),
+                _MetricChip(
+                  label: 'Lives',
+                  value: state == null || state.maxSharedLives == 0
+                      ? '-'
+                      : '${state.sharedLives}/${state.maxSharedLives}',
+                ),
+              ],
+            ),
+            if (state?.message != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                state!.message!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GameControlsCard extends StatelessWidget {
+  const _GameControlsCard({
+    required this.roomState,
+    required this.isConnected,
+    required this.onSelectGame,
+    required this.onStart,
+    required this.onRestart,
+    required this.onBackToRoom,
+  });
+
+  final RoomStateEvent? roomState;
+  final bool isConnected;
+  final ValueChanged<GameId> onSelectGame;
+  final VoidCallback onStart;
+  final VoidCallback onRestart;
+  final VoidCallback onBackToRoom;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = roomState;
+    final selectedGame = state?.selectedGame ?? GameId.motionSaber;
+    final availableGames = state?.availableGames ?? GameId.values;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.sports_esports, color: theme.colorScheme.primary),
+                const SizedBox(width: 10),
+                Text('Game Control', style: theme.textTheme.titleLarge),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SegmentedButton<GameId>(
+              segments: [
+                for (final gameId in availableGames)
+                  ButtonSegment(
+                    value: gameId,
+                    icon: Icon(_gameIcon(gameId)),
+                    label: Text(_shortGameLabel(gameId)),
+                  ),
+              ],
+              selected: {selectedGame},
+              onSelectionChanged: !isConnected
+                  ? null
+                  : (selection) => onSelectGame(selection.first),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Start'),
+                    onPressed: isConnected && (state?.canStart ?? false)
+                        ? onStart
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    icon: const Icon(Icons.replay),
+                    label: const Text('Restart'),
+                    onPressed: isConnected && (state?.canRestart ?? false)
+                        ? onRestart
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.meeting_room_outlined),
+              label: const Text('Back to room'),
+              onPressed: isConnected && (state?.canBackToRoom ?? false)
+                  ? onBackToRoom
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerScoreCard extends StatelessWidget {
+  const _PlayerScoreCard({required this.roomState, required this.playerId});
+
+  final RoomStateEvent? roomState;
+  final String playerId;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = roomState;
+    final score = state?.scoreForPlayer(playerId);
+    final leaders = state?.playerScores.take(3).toList() ?? const [];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.emoji_events, color: theme.colorScheme.primary),
+                const SizedBox(width: 10),
+                Text('Score', style: theme.textTheme.titleLarge),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MetricChip(label: 'Score', value: '${score?.score ?? 0}'),
+                _MetricChip(label: 'Combo', value: '${score?.combo ?? 0}'),
+                _MetricChip(label: 'Max', value: '${score?.maxCombo ?? 0}'),
+                _MetricChip(
+                  label: 'Hit/Miss',
+                  value: '${score?.hits ?? 0}/${score?.misses ?? 0}',
+                ),
+                _MetricChip(
+                  label: 'Time',
+                  value: _formatDuration(state?.survivedSeconds ?? 0),
+                ),
+              ],
+            ),
+            if (leaders.isNotEmpty) ...[
+              const Divider(height: 24),
+              for (final leader in leaders)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 26,
+                        child: Text(
+                          '#${leader.rank}',
+                          style: theme.textTheme.labelLarge,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          leader.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: leader.playerId == playerId
+                                ? FontWeight.w800
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '${leader.score}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MotionReadinessCard extends StatelessWidget {
+  const _MotionReadinessCard({
+    required this.isMotionActive,
+    required this.isCalibrated,
+    required this.level,
+    required this.settings,
+    required this.onChanged,
+    required this.onToggleSensors,
+    required this.onCalibrateGrip,
+  });
+
+  final bool isMotionActive;
   final bool isCalibrated;
+  final SensitivityLevel level;
+  final SensitivitySettings settings;
+  final ValueChanged<SensitivityLevel> onChanged;
+  final VoidCallback onToggleSensors;
+  final VoidCallback onCalibrateGrip;
 
   @override
   Widget build(BuildContext context) {
@@ -561,23 +935,57 @@ class _CalibrationStatusCard extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              isCalibrated ? Icons.check_circle : Icons.center_focus_strong,
-              color: isCalibrated
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                isCalibrated ? 'Grip calibrated' : 'Grip not calibrated',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+            Row(
+              children: [
+                Icon(
+                  isMotionActive ? Icons.sensors : Icons.sensors_off,
+                  color: theme.colorScheme.primary,
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Motion Readiness',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(isCalibrated ? 'Calibrated' : 'Not calibrated'),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    icon: Icon(
+                      isMotionActive ? Icons.sensors_off : Icons.sensors,
+                    ),
+                    label: Text(
+                      isMotionActive ? 'Stop motion' : 'Start motion',
+                    ),
+                    onPressed: onToggleSensors,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.center_focus_strong),
+                    label: const Text('Calibrate'),
+                    onPressed: onCalibrateGrip,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _SensitivityControl(
+              level: level,
+              settings: settings,
+              onChanged: onChanged,
             ),
           ],
         ),
@@ -710,153 +1118,6 @@ class _SensitivityMetric extends StatelessWidget {
   }
 }
 
-class _ControllerStatusGrid extends StatelessWidget {
-  const _ControllerStatusGrid({
-    required this.status,
-    required this.lastEvent,
-    required this.lastMotion,
-    required this.isMotionActive,
-    required this.trailTransport,
-    required this.udpTrailPacketsPerSecond,
-    required this.webSocketTrailPacketsPerSecond,
-    required this.trailSamplesPerSecond,
-  });
-
-  final ConnectionStatus status;
-  final String lastEvent;
-  final MotionDetectionResult? lastMotion;
-  final bool isMotionActive;
-  final String trailTransport;
-  final int udpTrailPacketsPerSecond;
-  final int webSocketTrailPacketsPerSecond;
-  final int trailSamplesPerSecond;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 560;
-
-        final cards = [
-          _StatusCard(
-            icon: status == ConnectionStatus.connected
-                ? Icons.wifi
-                : Icons.wifi_off,
-            label: 'Connection',
-            value: status.label,
-            trailing: status == ConnectionStatus.connected
-                ? const PulsingDot(color: Colors.green, size: 8)
-                : status == ConnectionStatus.connecting
-                ? const PulsingDot(color: Colors.blue, size: 8)
-                : null,
-          ),
-          _StatusCard(
-            icon: Icons.sensors,
-            label: 'Motion',
-            value: isMotionActive ? 'Active' : 'Idle',
-            trailing: isMotionActive
-                ? const PulsingDot(color: Colors.red, size: 8)
-                : null,
-          ),
-          _StatusCard(
-            icon: Icons.explore_outlined,
-            label: 'Direction',
-            value: lastMotion?.direction.name ?? '-',
-          ),
-          _StatusCard(
-            icon: Icons.speed,
-            label: 'Power',
-            value: lastMotion == null
-                ? '0%'
-                : '${(lastMotion!.power * 100).round()}%',
-          ),
-          _StatusCard(
-            icon: Icons.send_outlined,
-            label: 'Last event',
-            value: lastEvent,
-          ),
-          _StatusCard(
-            icon: Icons.timeline,
-            label: 'Trail',
-            value:
-                '$trailTransport ${udpTrailPacketsPerSecond + webSocketTrailPacketsPerSecond}p/s ${trailSamplesPerSecond}s/s',
-            trailing: trailTransport == 'UDP'
-                ? const PulsingDot(color: Colors.green, size: 8)
-                : null,
-          ),
-        ];
-
-        if (isWide) {
-          return Row(
-            children: [
-              for (final card in cards)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: card,
-                  ),
-                ),
-            ],
-          );
-        }
-
-        return Column(
-          children: [
-            for (final card in cards)
-              Padding(padding: const EdgeInsets.only(bottom: 8), child: card),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.trailing,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Icon(icon, color: theme.colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: theme.textTheme.labelLarge),
-                  Text(
-                    value,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _FeedbackOverlayBanner extends StatelessWidget {
   const _FeedbackOverlayBanner({required this.event});
 
@@ -920,332 +1181,5 @@ class _FeedbackOverlayBanner extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _HapticSimulatorPanel extends StatefulWidget {
-  const _HapticSimulatorPanel();
-
-  @override
-  State<_HapticSimulatorPanel> createState() => _HapticSimulatorPanelState();
-}
-
-class _HapticSimulatorPanelState extends State<_HapticSimulatorPanel>
-    with SingleTickerProviderStateMixin {
-  double _intensity = 0.5;
-  double _sharpness = 0.5;
-  double _duration = 0.1;
-  late AnimationController _pulseController;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-  }
-
-  @override
-  void dispose() {
-    _pulseController.dispose();
-    super.dispose();
-  }
-
-  void _triggerPulse(double durationSec) {
-    _pulseController.duration = Duration(
-      milliseconds: (durationSec * 1000).round().clamp(150, 1000),
-    );
-    _pulseController.forward(from: 0).then((_) {
-      if (mounted) {
-        _pulseController.reverse();
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.vibration, color: theme.colorScheme.primary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Haptic Simulator',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                ScaleTransition(
-                  scale: Tween<double>(begin: 1.0, end: 1.4).animate(
-                    CurvedAnimation(
-                      parent: _pulseController,
-                      curve: Curves.easeOut,
-                    ),
-                  ),
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: theme.colorScheme.primary.withValues(alpha: 0.8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: 0.4,
-                          ),
-                          blurRadius: 8,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              height: 60,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: CustomPaint(
-                  painter: _HapticWaveformPainter(
-                    intensity: _intensity,
-                    sharpness: _sharpness,
-                    duration: _duration,
-                  ),
-                  child: Container(),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Intensity: ${(_intensity * 100).round()}%',
-              style: theme.textTheme.labelMedium,
-            ),
-            Slider(
-              value: _intensity,
-              onChanged: (v) => setState(() => _intensity = v),
-              min: 0.0,
-              max: 1.0,
-            ),
-            Text(
-              'Sharpness (Frequency): ${(_sharpness * 100).round()}%',
-              style: theme.textTheme.labelMedium,
-            ),
-            Slider(
-              value: _sharpness,
-              onChanged: (v) => setState(() => _sharpness = v),
-              min: 0.0,
-              max: 1.0,
-            ),
-            Text(
-              'Duration: ${(_duration * 1000).round()}ms',
-              style: theme.textTheme.labelMedium,
-            ),
-            Slider(
-              value: _duration,
-              onChanged: (v) => setState(() => _duration = v),
-              min: 0.0,
-              max: 1.0,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      unawaited(
-                        HapticFeedbackService.playCustom(
-                          intensity: _intensity,
-                          sharpness: _sharpness,
-                          duration: _duration,
-                        ),
-                      );
-                      _triggerPulse(_duration);
-                    },
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('Play Custom'),
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            Text('Preset Tactile Feedback', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _PresetButton(
-                  label: 'Perfect',
-                  color: Colors.green,
-                  onPressed: () {
-                    unawaited(
-                      HapticFeedbackService.trigger(HapticPattern.perfect),
-                    );
-                    _triggerPulse(0.1);
-                  },
-                ),
-                _PresetButton(
-                  label: 'Good',
-                  color: Colors.cyan,
-                  onPressed: () {
-                    unawaited(
-                      HapticFeedbackService.trigger(HapticPattern.good),
-                    );
-                    _triggerPulse(0.08);
-                  },
-                ),
-                _PresetButton(
-                  label: 'Miss',
-                  color: Colors.red,
-                  onPressed: () {
-                    unawaited(
-                      HapticFeedbackService.trigger(HapticPattern.miss),
-                    );
-                    _triggerPulse(0.15);
-                  },
-                ),
-                _PresetButton(
-                  label: 'Combo',
-                  color: Colors.orange,
-                  onPressed: () {
-                    unawaited(
-                      HapticFeedbackService.trigger(HapticPattern.combo),
-                    );
-                    _triggerPulse(0.3);
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PresetButton extends StatelessWidget {
-  const _PresetButton({
-    required this.label,
-    required this.color,
-    required this.onPressed,
-  });
-
-  final String label;
-  final Color color;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: color,
-        side: BorderSide(color: color.withValues(alpha: 0.5)),
-      ),
-      onPressed: onPressed,
-      child: Text(label),
-    );
-  }
-}
-
-class _HapticWaveformPainter extends CustomPainter {
-  _HapticWaveformPainter({
-    required this.intensity,
-    required this.sharpness,
-    required this.duration,
-  });
-
-  final double intensity;
-  final double sharpness;
-  final double duration;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.blue.withValues(alpha: 0.3)
-      ..style = PaintingStyle.fill;
-
-    final gridPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.1)
-      ..strokeWidth = 1;
-    for (var i = 1; i < 4; i++) {
-      final x = size.width * i / 4;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-
-    final pulseWidth = (duration * size.width * 0.8).clamp(
-      10.0,
-      size.width * 0.9,
-    );
-    final pulseHeight = intensity * size.height * 0.8;
-    final startX = (size.width - pulseWidth) / 2;
-    final startY = (size.height - pulseHeight) / 2;
-
-    final rect = Rect.fromLTWH(startX, startY, pulseWidth, pulseHeight);
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
-
-    final gradient = LinearGradient(
-      colors: [
-        Colors.blue.withValues(alpha: 0.2 + 0.6 * sharpness),
-        Colors.purple.withValues(alpha: 0.4 + 0.5 * intensity),
-      ],
-    ).createShader(rect);
-
-    paint.shader = gradient;
-    canvas.drawRRect(rrect, paint);
-
-    if (intensity > 0) {
-      final wavePaint = Paint()
-        ..color = Colors.white.withValues(alpha: 0.7)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2;
-
-      final path = Path();
-      final pointsCount = (pulseWidth * 2).round();
-      final waveFrequency = 5 + 25 * sharpness;
-
-      var first = true;
-      for (var i = 0; i <= pointsCount; i++) {
-        final x = startX + (i / pointsCount) * pulseWidth;
-        final relativeX = i / pointsCount;
-        final edgeFade = math.sin(relativeX * math.pi);
-        final y =
-            (size.height / 2) +
-            math.sin(relativeX * waveFrequency * math.pi) *
-                (pulseHeight / 2) *
-                edgeFade;
-
-        if (first) {
-          path.moveTo(x, y);
-          first = false;
-        } else {
-          path.lineTo(x, y);
-        }
-      }
-      canvas.drawPath(path, wavePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_HapticWaveformPainter oldDelegate) {
-    return oldDelegate.intensity != intensity ||
-        oldDelegate.sharpness != sharpness ||
-        oldDelegate.duration != duration;
   }
 }

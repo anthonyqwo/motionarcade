@@ -191,6 +191,71 @@ void main() {
     expect(config.maxBatchSize, 6);
   });
 
+  test('encodes and decodes game command event', () {
+    final event = GameCommandEvent(
+      playerId: 'p1',
+      timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+      command: GameCommand.selectGame,
+      gameId: GameId.basketball,
+      requestId: 'req-1',
+    );
+
+    final decoded = codec.decode(codec.encode(event));
+
+    expect(decoded, isA<GameCommandEvent>());
+    final command = decoded as GameCommandEvent;
+    expect(command.command, GameCommand.selectGame);
+    expect(command.gameId, GameId.basketball);
+    expect(command.requestId, 'req-1');
+  });
+
+  test('encodes and decodes room state event', () {
+    final event = RoomStateEvent(
+      playerId: 'host',
+      timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+      selectedGame: GameId.motionSaber,
+      availableGames: const [
+        GameId.motionSaber,
+        GameId.basketball,
+        GameId.pingPong,
+      ],
+      roomPhase: RoomPhase.playing,
+      connectedPlayers: 2,
+      canStart: false,
+      canRestart: true,
+      canBackToRoom: true,
+      sharedLives: 2,
+      maxSharedLives: 3,
+      survivedSeconds: 12.5,
+      message: 'Playing',
+      playerScores: const [
+        PlayerScoreSnapshot(
+          playerId: 'p1',
+          name: 'Player 1',
+          score: 120,
+          combo: 2,
+          maxCombo: 4,
+          hits: 3,
+          misses: 1,
+          rank: 1,
+        ),
+      ],
+    );
+
+    final decoded = codec.decode(codec.encode(event));
+
+    expect(decoded, isA<RoomStateEvent>());
+    final state = decoded as RoomStateEvent;
+    expect(state.selectedGame, GameId.motionSaber);
+    expect(state.availableGames, contains(GameId.basketball));
+    expect(state.roomPhase, RoomPhase.playing);
+    expect(state.connectedPlayers, 2);
+    expect(state.canRestart, isTrue);
+    expect(state.sharedLives, 2);
+    expect(state.survivedSeconds, 12.5);
+    expect(state.scoreForPlayer('p1')?.score, 120);
+  });
+
   test('encodes and decodes disconnect event', () {
     final event = DisconnectEvent(
       playerId: 'p1',
