@@ -13,6 +13,7 @@ import '../shared/models/player.dart';
 import '../shared/visual/trail_point_buffer.dart';
 import '../shared/visual/pulsing_dot.dart';
 import '../shared/visual/trail_renderer.dart';
+import '../games/basketball/basketball_game_page.dart';
 import 'game_shell_page.dart';
 import '../games/saber/saber_game_page.dart';
 
@@ -264,6 +265,8 @@ class _RoomPageState extends State<RoomPage> {
         ),
     ];
 
+    final isPlayableGame = _isPlayableGame(_selectedGame);
+
     return RoomStateEvent(
       playerId: 'host',
       timestamp: DateTime.now(),
@@ -272,12 +275,11 @@ class _RoomPageState extends State<RoomPage> {
       roomPhase: RoomPhase.lobby,
       playerScores: scores,
       connectedPlayers: _connectedPlayersCount,
-      canStart:
-          _connectedPlayersCount > 0 && _selectedGame == GameId.motionSaber,
+      canStart: _connectedPlayersCount > 0 && isPlayableGame,
       canRestart: false,
       canBackToRoom: false,
-      sharedLives: 3,
-      maxSharedLives: 3,
+      sharedLives: _selectedGame == GameId.motionSaber ? 3 : 0,
+      maxSharedLives: _selectedGame == GameId.motionSaber ? 3 : 0,
       survivedSeconds: 0,
       message: message,
     );
@@ -346,7 +348,7 @@ class _RoomPageState extends State<RoomPage> {
         });
         _broadcastRoomState(message: '${_gameLabel(gameId)} selected.');
       case GameCommand.startGame:
-        if (_selectedGame != GameId.motionSaber) {
+        if (!_isPlayableGame(_selectedGame)) {
           _broadcastRoomState(
             message: '${_gameLabel(_selectedGame)} is planned next.',
           );
@@ -371,12 +373,14 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   void _startGame() {
-    if (_selectedGame != GameId.motionSaber) {
+    if (!_isPlayableGame(_selectedGame)) {
       _broadcastRoomState(
         message: '${_gameLabel(_selectedGame)} is planned next.',
       );
       return;
     }
+
+    final selectedGame = _selectedGame;
 
     _eventSubscription?.cancel();
     _udpEventSubscription?.cancel();
@@ -386,11 +390,23 @@ class _RoomPageState extends State<RoomPage> {
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) => SaberGamePage(
-              server: _server,
-              motionEvents: _udpServer.events,
-              players: _players,
-            ),
+            builder: (_) => switch (selectedGame) {
+              GameId.motionSaber => SaberGamePage(
+                server: _server,
+                motionEvents: _udpServer.events,
+                players: _players,
+              ),
+              GameId.basketball => BasketballGamePage(
+                server: _server,
+                motionEvents: _udpServer.events,
+                players: _players,
+              ),
+              GameId.pingPong => SaberGamePage(
+                server: _server,
+                motionEvents: _udpServer.events,
+                players: _players,
+              ),
+            },
           ),
         )
         .then((_) {
@@ -717,6 +733,13 @@ String _shortGameLabel(GameId gameId) {
     GameId.motionSaber => 'Saber',
     GameId.basketball => 'Basketball',
     GameId.pingPong => 'Ping Pong',
+  };
+}
+
+bool _isPlayableGame(GameId gameId) {
+  return switch (gameId) {
+    GameId.motionSaber || GameId.basketball => true,
+    GameId.pingPong => false,
   };
 }
 

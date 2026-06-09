@@ -14,11 +14,13 @@ import 'calibration_service.dart';
 import 'fused_motion_service.dart';
 import 'haptic_feedback_service.dart';
 import 'motion_detector.dart';
+import 'motion_window_buffer.dart';
 import 'motion_sensor_service.dart';
 import 'motion_trail_streamer.dart';
 import 'controller_debug_page.dart';
 import 'qr_scan_page.dart';
 import 'sensitivity_settings.dart';
+import 'shoot_detector.dart';
 
 class ControllerHomePage extends StatefulWidget {
   const ControllerHomePage({
@@ -47,6 +49,10 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       widget.fusedMotionService ??
       FusedMotionService(calibrationService: _calibrationService);
   late MotionDetector _motionDetector = _buildMotionDetector();
+  final MotionWindowBuffer _shotMotionBuffer = MotionWindowBuffer(
+    capacity: 140,
+  );
+  final ShootDetector _shootDetector = const ShootDetector();
   late final MotionTrailStreamer _motionTrailStreamer = MotionTrailStreamer(
     playerId: _playerId,
     onEvent: (event) {
@@ -72,6 +78,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   StreamSubscription<FusedMotionSnapshot>? _fusedMotionSubscription;
   StreamSubscription<MotionEvent>? _clientEventSubscription;
   Timer? _trailRateTimer;
+  Timer? _shotHoldUiTimer;
   FeedbackEvent? _lastFeedback;
   bool _showFeedbackOverlay = false;
   Timer? _feedbackOverlayTimer;
@@ -84,7 +91,11 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   SensitivityLevel _sensitivityLevel = SensitivityLevel.medium;
   bool _isCalibrated = false;
   String _lastEvent = 'None';
+  String _lastShotStatus = 'Ready';
   String? _errorMessage;
+  ShootEvent? _lastShotEvent;
+  DateTime? _shotHoldStartedAt;
+  bool _isShotHolding = false;
   int _udpTrailPacketsSent = 0;
   int _webSocketTrailPacketsSent = 0;
   int _trailSamplesSent = 0;
@@ -162,6 +173,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     unawaited(_fusedMotionSubscription?.cancel());
     unawaited(_clientEventSubscription?.cancel());
     _trailRateTimer?.cancel();
+    _shotHoldUiTimer?.cancel();
     _feedbackOverlayTimer?.cancel();
     unawaited(_udpClient.disconnect());
     unawaited(_client.disconnect());
@@ -288,9 +300,14 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     final trailSample = snapshot.controllerSample;
     if (trailSample != null && snapshot.isActive) {
       _motionTrailStreamer.onSample(trailSample);
+      _shotMotionBuffer.add(trailSample);
     }
 
-    final result = _motionDetector.detectFused(snapshot);
+    final shouldDetectSlash =
+        (_roomState?.selectedGame ?? GameId.motionSaber) != GameId.basketball;
+    final result = shouldDetectSlash
+        ? _motionDetector.detectFused(snapshot)
+        : null;
 
     setState(() {
       _fusedMotionSnapshot = snapshot;
@@ -384,6 +401,92 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     );
   }
 
+  void _startShotHold() {
+    if (_isShotHolding) {
+      return;
+    }
+    if (_status != ConnectionStatus.connected) {
+      setState(() => _errorMessage = 'Connect to a room first.');
+      return;
+    }
+    if (!_isMotionActive) {
+      setState(() => _errorMessage = 'Start motion before shooting.');
+      return;
+    }
+
+    _shotMotionBuffer.clear();
+    final now = DateTime.now();
+    setState(() {
+      _isShotHolding = true;
+      _shotHoldStartedAt = now;
+      _lastShotStatus = 'Aiming';
+      _errorMessage = null;
+    });
+    _send(
+      ShootHoldEvent(playerId: _playerId, timestamp: now, pressed: true),
+      updateLastEvent: false,
+    );
+    unawaited(HapticFeedback.selectionClick());
+    _shotHoldUiTimer?.cancel();
+    _shotHoldUiTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+      if (mounted && _isShotHolding) {
+        setState(() {});
+      }
+    });
+  }
+
+  void _releaseShotHold({bool cancelled = false}) {
+    final startedAt = _shotHoldStartedAt;
+    if (!_isShotHolding || startedAt == null) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final holdDurationMs = now.difference(startedAt).inMilliseconds;
+    _shotHoldUiTimer?.cancel();
+    _shotHoldUiTimer = null;
+    _send(
+      ShootHoldEvent(playerId: _playerId, timestamp: now, pressed: false),
+      updateLastEvent: false,
+    );
+
+    if (cancelled) {
+      setState(() {
+        _isShotHolding = false;
+        _shotHoldStartedAt = null;
+        _lastShotStatus = 'Cancelled';
+      });
+      return;
+    }
+
+    final samples = _shotMotionBuffer.getWindowSnapshot(900);
+    final detection = _shootDetector.detect(
+      samples: samples,
+      holdDurationMs: holdDurationMs,
+      playerId: _playerId,
+      timestamp: now,
+    );
+    final event = detection.event;
+    if (event == null) {
+      setState(() {
+        _isShotHolding = false;
+        _shotHoldStartedAt = null;
+        _lastShotStatus = detection.reason;
+      });
+      unawaited(HapticFeedback.lightImpact());
+      return;
+    }
+
+    _send(event);
+    setState(() {
+      _isShotHolding = false;
+      _shotHoldStartedAt = null;
+      _lastShotEvent = event;
+      _lastShotStatus = 'Shot sent';
+    });
+    unawaited(HapticFeedback.mediumImpact());
+  }
+
   void _openDebugPage() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -421,6 +524,21 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
 
   bool get _isMotionActive {
     return _sensorSnapshot.isActive || _fusedMotionSnapshot.isActive;
+  }
+
+  bool get _isBasketballSelected {
+    return (_roomState?.selectedGame ?? GameId.motionSaber) ==
+        GameId.basketball;
+  }
+
+  double get _shotHoldProgress {
+    final startedAt = _shotHoldStartedAt;
+    if (!_isShotHolding || startedAt == null) {
+      return 0;
+    }
+    return (DateTime.now().difference(startedAt).inMilliseconds / 1200)
+        .clamp(0.0, 1.0)
+        .toDouble();
   }
 
   void _setSensitivity(SensitivityLevel level) {
@@ -550,6 +668,20 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                   ),
                   const SizedBox(height: 12),
                   _PlayerScoreCard(roomState: _roomState, playerId: _playerId),
+                  if (_isBasketballSelected) ...[
+                    const SizedBox(height: 12),
+                    _BasketballShotPad(
+                      isEnabled: isConnected && _isMotionActive,
+                      isHolding: _isShotHolding,
+                      chargeProgress: _shotHoldProgress,
+                      lastStatus: _lastShotStatus,
+                      lastShot: _lastShotEvent,
+                      score: _roomState?.scoreForPlayer(_playerId),
+                      onHoldStart: _startShotHold,
+                      onHoldEnd: () => _releaseShotHold(),
+                      onHoldCancel: () => _releaseShotHold(cancelled: true),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   _MotionReadinessCard(
                     isMotionActive: _isMotionActive,
@@ -904,6 +1036,129 @@ class _PlayerScoreCard extends StatelessWidget {
                 ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BasketballShotPad extends StatelessWidget {
+  const _BasketballShotPad({
+    required this.isEnabled,
+    required this.isHolding,
+    required this.chargeProgress,
+    required this.lastStatus,
+    required this.lastShot,
+    required this.score,
+    required this.onHoldStart,
+    required this.onHoldEnd,
+    required this.onHoldCancel,
+  });
+
+  final bool isEnabled;
+  final bool isHolding;
+  final double chargeProgress;
+  final String lastStatus;
+  final ShootEvent? lastShot;
+  final PlayerScoreSnapshot? score;
+  final VoidCallback onHoldStart;
+  final VoidCallback onHoldEnd;
+  final VoidCallback onHoldCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final activeColor = isHolding
+        ? const Color(0xFFF97316)
+        : theme.colorScheme.primary;
+    final foreground = isEnabled
+        ? theme.colorScheme.onPrimary
+        : theme.colorScheme.onSurfaceVariant;
+
+    return Card(
+      color: isEnabled
+          ? activeColor.withValues(alpha: isHolding ? 0.95 : 0.82)
+          : theme.colorScheme.surfaceContainerHighest,
+      child: Listener(
+        onPointerDown: isEnabled ? (_) => onHoldStart() : null,
+        onPointerUp: isEnabled ? (_) => onHoldEnd() : null,
+        onPointerCancel: isEnabled ? (_) => onHoldCancel() : null,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 188),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.sports_basketball, color: foreground),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Basketball Shot',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${score?.score ?? 0} pts  ${score?.combo ?? 0}x',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: foreground.withValues(alpha: 0.86),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                Center(
+                  child: Text(
+                    isHolding ? 'RELEASE TO SHOOT' : 'HOLD TO AIM',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: foreground,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    minHeight: 8,
+                    value: isHolding ? chargeProgress : 0,
+                    backgroundColor: foreground.withValues(alpha: 0.22),
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        lastStatus,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: foreground.withValues(alpha: 0.88),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (lastShot != null)
+                      Text(
+                        'P ${lastShot!.power.toStringAsFixed(2)}  A ${lastShot!.angle.round()}',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: foreground.withValues(alpha: 0.82),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

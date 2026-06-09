@@ -6,189 +6,529 @@ Planned
 
 ## 目的
 
-加入投籃模式，讓玩家透過手機投籃動作產生 shoot event，電腦端顯示籃球拋物線與進球判定。
+建立 Phase 7 的 Basketball 模式。玩法參考舊版 Messenger 籃球小遊戲：玩家連續投籃、進球累積分數，達到一定 streak 後籃框開始移動增加難度。Motion Arcade 版本改用手機體感投籃：玩家按住手機畫面準備投籃，做出投籃動作後放開，手機送出 `ShootEvent`，桌面端播放 2D 拋物線與籃框碰撞動畫。
 
-投籃偵測採用「觸控閘門」設計：玩家按住螢幕準備投籃，做出投籃動作後放開螢幕。放開的瞬間作為出手時間錨點，系統取放開前 500-900ms 的 MotionWindow 分析投籃品質，產生 ShootEvent。這個設計讓投籃觸發有明確的時間邊界，不需要靠純 IMU 資料猜測出手時機，大幅降低誤觸率。
-
-## 觸控閘門投籃流程
-
-```text
-玩家按住螢幕（touch down）
-        ↓
-手機送出 shootHold event
-MotionWindowBuffer 持續記錄 fused samples
-        ↓
-玩家做投籃動作（抬手、向上加速、出手）
-        ↓
-玩家放開螢幕（touch up）= 出手時刻
-        ↓
-手機取 touch up 前 500-900ms 的 motion window
-        ↓
-ShootDetector 從 window 擷取 features
-        ↓
-通過最低門檻 → 產生 ShootEvent
-未通過 → 丟棄，不送事件
-        ↓
-ShootEvent 送到電腦端
-電腦端播放拋物線動畫
-```
-
-## 為什麼用觸控閘門
-
-| 方案 | 誤觸風險 | 實作難度 | 玩家操作 |
-|---|---|---|---|
-| 純 IMU state machine | 高，任何向上甩都可能觸發 | 高，需調 state machine | 自然，但不穩定 |
-| **觸控閘門** | **低，只有放開螢幕才觸發** | **低，邏輯簡單** | **按住 → 投 → 放開** |
-| 固定按鈕觸發 | 零，完全手動 | 最低 | 不自然，沒有體感 |
-
-觸控閘門兼顧體感直覺與偵測可靠度：玩家仍然要做真實的投籃動作，系統才會判定為有效投籃。只是用觸控來標記「我正在投籃」這個意圖，避免走路或揮手被誤判。
+這不是完整籃球規則，不做運球、防守、犯規或回合制。核心是短循環、好上手、越連進越緊張的街機投籃挑戰。
 
 ## 使用階段
 
 Phase 7
 
-## 輸入
+## 玩法核心
 
-- Touch down / touch up 事件。
-- `MotionWindow`：touch up 前 500-900ms 的 fused motion samples。
-- Calibrated gameplay-local acceleration 與 rotationRate。
+```text
+Lobby 選 Basketball
+→ 3 秒倒數
+→ Ready Shot
+→ 手機按住 + 做投籃動作 + 放開
+→ ShootEvent 送到 host
+→ 桌面播放球路與籃框碰撞
+→ 進球：score +1，streak +1，更新難度
+→ 沒進：streak 歸零，保留 best score / best streak
+→ 下一球
+→ Restart：清空本輪 score / streak / ball state
+→ Back to room：回 lobby
+```
 
-## 輸出
+第一版不使用 60 秒限時。先做無限連續投籃挑戰，讓玩家追求最高 streak。限時模式保留為後續擴充。
 
-- `ShootEvent(power, angle, offset, stability)`。
-- 籃球拋物線動畫。
-- 進球或未進判定。
-- 分數與 Combo。
-- Feedback event。
+## 難度曲線
+
+Messenger 風格的關鍵是前期簡單、10 球後開始移動籃框。
+
+| Streak | 籃框 | 命中容錯 | 說明 |
+| --- | --- | --- | --- |
+| 0-4 | 固定 | 大 | 學習手感，投得進最重要 |
+| 5-9 | 固定 | 中 | 稍微縮小 rim plane 命中區 |
+| 10-14 | 左右慢速移動 | 中 | 對齊 Messenger 的移動籃框變難點 |
+| 15-24 | 左右中速移動 | 小 | 移動幅度加大，出手 timing 更重要 |
+| 25+ | 左右快速移動 | 小 | 高分挑戰；可加入籃框起點變化 |
+
+建議參數：
+
+```text
+streak 0-4:   hoopSpeed = 0,   hoopAmplitude = 0,    hitTolerance = 1.00
+streak 5-9:   hoopSpeed = 0,   hoopAmplitude = 0,    hitTolerance = 0.88
+streak 10-14: hoopSpeed = 0.7, hoopAmplitude = 70,   hitTolerance = 0.82
+streak 15-24: hoopSpeed = 1.0, hoopAmplitude = 100,  hitTolerance = 0.76
+streak 25+:   hoopSpeed = 1.35, hoopAmplitude = 130, hitTolerance = 0.70
+```
+
+## 手機端輸入：觸控閘門
+
+Basketball 使用「觸控閘門」避免誤觸。
+
+```text
+玩家按住螢幕（touch down）
+→ 手機送 ShootHoldEvent(pressed: true)
+→ MotionWindowBuffer 持續記錄 fused samples
+→ 玩家做投籃動作
+→ 玩家放開螢幕（touch up）= 出手時刻
+→ 手機取 touch up 前 500-900ms motion window
+→ ShootDetector 產生 ShootEvent 或 null
+→ 送出 ShootEvent
+→ 手機送 ShootHoldEvent(pressed: false)
+```
+
+無效投籃不送 `ShootEvent`，只在手機端顯示「動作太小 / 橫向太多 / 按太短」。
+
+## ShootDetector
+
+輸入：
+
+- `List<FusedMotionSample>`：touch up 前 500-900ms window。
+- `holdDurationMs`。
+- calibrated gameplay-local acceleration 與 rotationRate。
+
+輸出：
+
+- `ShootEvent(power, angle, offset, stability, holdDurationMs)` 或 null。
+
+### Features
+
+`upwardEnergy`
+
+- window 中 `userAcceleration.y > 0` 的累積能量。
+- 代表投籃向上的主要力量。
+
+`releasePeak`
+
+- 找 Y 軸加速度由正轉負附近的出手點。
+- 不直接用 magnitude 最大值，避免 follow-through 甩腕誤判。
+
+`horizontalNoise`
+
+- X 軸能量 / 總能量。
+- 投籃主動作應該以向上為主，左右橫甩太多視為無效。
+
+`lateralDrift`
+
+- 出手窗口內 X 軸位移/能量傾向。
+- 映射到 `ShootEvent.offset`，影響球左右偏移。
+
+`stability`
+
+- release peak 前後約 100ms 的方向一致性。
+- 越穩代表出手品質越好，可增加命中容錯，但不直接隨機保送進球。
+
+### 無效投籃門檻
+
+```text
+holdDurationMs < 200         → 誤觸
+windowSamples 太少           → 資料不足
+upwardEnergy < minThreshold  → 沒有向上投籃動作
+horizontalNoise > 0.40       → 橫甩，不是投籃
+peakMagnitude < minPeak      → 動作太輕
+```
+
+### ShootEvent 映射
+
+```text
+power     = normalize(upwardEnergy)
+angle     = clamp(atan2(peakY, abs(peakZ)), 32°..62°)
+offset    = clamp(lateralDrift / totalEnergy, -1..1)
+stability = directionConsistency
+```
+
+`power` 不應完全線性。建議使用 ease-out，讓普通投籃容易到達籃框，但過強仍會過頭。
+
+```text
+mappedPower = 1 - pow(1 - rawPower, 1.6)
+```
+
+## 桌面端 2D 物理
+
+第一版不使用完整 physics engine。使用 deterministic 解析式拋物線與簡單碰撞，便於調手感。
+
+### 座標
+
+- 螢幕座標 x 向右、y 向下。
+- 球往上飛時 `velocity.y < 0`。
+- 重力 `gravity.y > 0`。
+
+### Ball model
+
+```text
+BasketballBall
+- position: Offset
+- previousPosition: Offset
+- velocity: Offset
+- radius: double
+- ageSeconds: double
+- collisionCount: int
+- resolved: bool
+```
+
+### Hoop model
+
+```text
+BasketballHoop
+- rimCenter: Offset
+- rimWidth: double
+- rimRadius: double
+- leftRimCenter: Offset
+- rightRimCenter: Offset
+- backboardRect: Rect
+- hitTolerance: double
+- movementOffset: double
+```
+
+### 每幀更新順序
+
+```text
+1. previousPosition = position
+2. velocity += gravity * dt
+3. position += velocity * dt
+4. 檢查是否由上往下穿過 rim plane
+5. 若穿過且在命中區內 → score
+6. 若未 score → resolve rim collision
+7. resolve backboard collision
+8. 檢查 out of bounds / timeout / collision limit → miss
+```
+
+進球判定要在 collision 前做，避免乾淨空心球被 rim 小圓碰撞誤擋。
+
+## 籃框碰撞細節
+
+Basketball 桌面端需要有擦框、彈框、碰背板的細節。碰撞不用做真實剛體，只要手感可信。
+
+### Rim collision：圓對圓
+
+把籃框左右邊緣當成兩個小圓：
+
+```text
+leftRimCenter  = rimCenter + Offset(-rimWidth / 2, 0)
+rightRimCenter = rimCenter + Offset( rimWidth / 2, 0)
+rimRadius = 7
+ballRadius = 14
+```
+
+碰撞解法：
+
+```text
+delta = ball.position - rimCenter
+distance = delta.length
+minDistance = ball.radius + rimRadius
+
+if distance < minDistance:
+  normal = delta / distance
+  ball.position = rimCenter + normal * minDistance
+  velocityAlongNormal = dot(ball.velocity, normal)
+  if velocityAlongNormal < 0:
+    ball.velocity -= (1 + restitution) * velocityAlongNormal * normal
+    ball.velocity *= damping
+    collisionCount += 1
+```
+
+建議參數：
+
+```text
+rimRestitution = 0.62
+rimDamping = 0.92
+rimRadius = 7
+```
+
+### Backboard collision：圓對矩形
+
+背板可先當垂直矩形，處理最常見的「球從前方碰板」。
+
+```text
+if backboard.inflate(ball.radius).contains(ball.position):
+  ball.position.x = backboard.left - ball.radius
+  ball.velocity.x = -ball.velocity.x * 0.55
+  ball.velocity.y =  ball.velocity.y * 0.82
+  collisionCount += 1
+```
+
+若球已經在背板後方或速度方向不合理，避免重複碰撞卡住。
+
+### 擦框仍可能進球
+
+球碰到 rim 後不要立刻 miss。只要後續仍然：
+
+```text
+previousY < rimPlaneY
+currentY >= rimPlaneY
+velocityY > 0
+abs(ball.x - rimCenter.x) <= effectiveRimWidth / 2
+```
+
+就判定進球。這樣會有「擦框後掉進去」的手感。
+
+### Miss 條件
+
+```text
+ball.position.y > screen.height + ball.radius * 2
+ball.position.x < -ball.radius * 3
+ball.position.x > screen.width + ball.radius * 3
+ball.ageSeconds > 3.5
+collisionCount > 5
+```
+
+Miss 類型可記錄：
+
+- `short`
+- `long`
+- `left`
+- `right`
+- `rimOut`
+- `backboardOut`
+
+## 出手到球路映射
+
+初始位置固定在畫面下方中央附近，像 Messenger 小遊戲的球起點。
+
+```text
+startX = screen.width / 2
+startY = screen.height - 72
+```
+
+初速度：
+
+```text
+vx = offset * lateralScale
+vy = -lerp(720, 1040, power)
+arc = lerp(0.86, 1.16, normalizedAngle)
+velocity = Offset(vx, vy * arc)
+gravity = Offset(0, 1500)
+```
+
+建議參數：
+
+```text
+ballRadius = 14
+gravityY = 1450..1600
+lateralScale = 260
+minVy = -720
+maxVy = -1040
+perfectAngle = 45°
+```
+
+`stability` 用於微調初速度噪聲與命中容錯：
+
+```text
+effectiveTolerance = baseTolerance * lerp(0.85, 1.08, stability)
+velocityNoise = lerp(18, 3, stability)
+```
+
+## 得分規則
+
+Messenger 風格第一版：
+
+- 進球：`score += 1`
+- 連進：`streak += 1`
+- Miss：`streak = 0`
+- `bestStreak` 保留本輪最高連進。
+- 多人各玩家獨立 score / streak / bestStreak。
+- 沒有 shared lives。
+
+後續可加：
+
+- 連進 5 顆後每球 +2。
+- 連進 10 顆後每球 +3。
+- 限時模式總分。
+
+第一版建議只用每球 +1，讓難度和排名容易理解。
+
+## Feedback
+
+進球：
+
+- 手機：`FeedbackEvent(result: perfect/good, haptic: perfect/good)`
+- 桌面：球穿網、分數跳動、短粒子/閃光。
+
+Miss：
+
+- 手機：`FeedbackEvent(result: miss, haptic: miss)`
+- 桌面：球掉落或彈出，顯示 short / left / right / rim out。
+
+無效投籃：
+
+- 不送 ShootEvent。
+- 手機本地顯示原因，可用 light haptic，不干擾 host。
+
+## 手機端 UI
+
+Basketball selected 時，Controller Home 額外顯示投籃 pad。
+
+```text
+┌─────────────────────────┐
+│ Room: Basketball         │
+│ Score 12   Streak 4      │
+├─────────────────────────┤
+│                         │
+│   HOLD TO AIM           │
+│                         │
+│   RELEASE TO SHOOT      │
+│                         │
+│   charge bar            │
+│                         │
+├─────────────────────────┤
+│ Last: Rim out            │
+│ Power .78  Angle 44°     │
+└─────────────────────────┘
+```
+
+互動：
+
+- touch down：進入 aiming 狀態，送 `ShootHoldEvent(pressed: true)`。
+- hold 中：顯示 charge progress，建議 0.2s 到 1.2s 填滿。
+- touch up：從 MotionWindowBuffer 取 samples，執行 ShootDetector。
+- valid：送 `ShootEvent`。
+- invalid：顯示原因，不送事件。
+
+## 桌面端 UI
+
+視覺風格：
+
+- 乾淨 2D 球場背景。
+- 籃框在上半部，球在下方。
+- 球路有輕微 trail。
+- 籃框移動時保持清楚可讀，不要太花。
+- 分數與 streak 置頂，排行榜靠側邊或底部。
+
+畫面元素：
+
+- Backboard。
+- Rim / net。
+- Ball。
+- Shot trail。
+- Score / streak / best。
+- Difficulty indicator。
+- Player leaderboard。
+
+## Room / Controller 整合
+
+沿用 Phase 6.5：
+
+- 手機選 `GameId.basketball`。
+- RoomPage 接 `GameCommandEvent.selectGame` 更新 selected game。
+- `startGame` 進 BasketballGamePage。
+- BasketballGamePage broadcast `RoomStateEvent`：
+  - `selectedGame = basketball`
+  - `roomPhase = countdown / playing / gameOver`
+  - `playerScores`
+  - `message`
+- `restartGame` 呼叫 BasketballGameState restart。
+- `backToRoom` 回 RoomPage。
 
 ## 主要檔案
+
+新增：
 
 - `lib/controller/shoot_detector.dart`
 - `lib/controller/shoot_touch_handler.dart`
 - `lib/games/basketball/basketball_game_page.dart`
 - `lib/games/basketball/basketball_game_state.dart`
-- `lib/games/basketball/shot_motion_features.dart`
 - `lib/games/basketball/basketball_painter.dart`
+- `lib/games/basketball/basketball_physics.dart`
+- `lib/games/basketball/shot_motion_features.dart`
 - `test/shoot_detector_test.dart`
+- `test/basketball_physics_test.dart`
+- `test/basketball_gameplay_test.dart`
 
-## 依賴 Skills
+修改：
 
-- Fused Motion
-- Calibration
-- Motion Window Trail
-- Motion Protocol
-- WebSocket Connection
-- 2.5D Visual
-- Scoring System
-- Feedback System
+- `lib/controller/controller_home_page.dart`
+- `lib/desktop/room_page.dart`
+- `lib/shared/models/motion_event.dart`（若需新增 shot result state）
+- `lib/network/motion_event_codec.dart`
 
-## ShootDetector 分析邏輯
+## 實作順序
 
-玩家放開螢幕後，ShootDetector 從 MotionWindowBuffer 取出 touch up 前 500-900ms 的 samples，計算以下 features：
+### Step 1：2D Physics Model
 
-### upwardEnergy
+- 建立 `BasketballBall`。
+- 建立 `BasketballHoop`。
+- 建立 `BasketballPhysics.step(dt)`。
+- 實作 rim plane scoring。
+- 實作 left/right rim circle collision。
+- 實作 backboard collision。
+- 實作 miss/out-of-bounds。
+- 單元測試：
+  - 乾淨穿過 rim plane 得分。
+  - 偏左/偏右不進。
+  - 撞 rim 後 velocity 反彈。
+  - 撞背板後 x velocity 反向。
+  - 擦框後仍可進。
 
-window 中所有 gameplay-local `userAcceleration.y > 0` 的累積能量。投籃的主方向是向上，upwardEnergy 太低代表不是有效投籃。
+### Step 2：Basketball Game State
 
-### releasePeak
+- 建立 score / streak / bestStreak。
+- 建立 player stats map。
+- 接收 `ShootEvent` 產生 ball。
+- 每幀更新 ball physics。
+- score/miss 後等待下一球。
+- 依 streak 更新 difficulty。
 
-找 window 中 Y 軸加速度從正變負的過零點，作為真正的釋放時刻。不使用 magnitude 最大點，因為甩腕 follow-through 可能產生比出手更大的 peak。
+### Step 3：Basketball Painter
 
-### horizontalNoise
+- 畫背景、背板、rim、net、ball、trail、HUD。
+- 確認籃框移動與球路都清楚。
+- Miss / score 動畫簡潔，避免遮住球。
 
-X 軸（左右）能量佔總能量的比例。投籃時 X 軸應安靜，如果 noiseRatio > 0.4 代表這是橫甩而非投籃，即使玩家有按住螢幕也判定為無效。
+### Step 4：ShootDetector
 
-### stability
+- 使用 MotionWindowBuffer snapshot。
+- 實作 features 與 invalid filtering。
+- 映射 `ShootEvent`。
+- 單元測試 valid / invalid。
 
-releasePeak 前後 100ms 內 acceleration 方向的一致性。越穩定代表出手品質越好，對應 ShootEvent 的 stability 欄位。
+### Step 5：Controller 投籃 UI
 
-### 最低門檻（無效投籃過濾）
+- Basketball selected 時顯示 hold/release shot pad。
+- touch down/up 串 `ShootHoldEvent` 與 `ShootDetector`。
+- 顯示 last shot result。
+- 維持 Debug 頁可看 motion window / recent events。
 
-即使玩家有觸控閘門，以下情況仍判定為無效：
+### Step 6：Room 整合
 
-```text
-upwardEnergy < minUpwardThreshold → 沒有向上力量
-horizontalNoise > 0.4 → 橫向雜訊太多
-peakMagnitude < minPeakThreshold → 動作太輕
-holdDuration < 200ms → 按太短，可能是誤觸
-```
-
-## ShootEvent 參數映射
-
-```text
-power    = normalize(upwardEnergy)        → 影響球路距離
-angle    = atan2(peakY, peakZ)            → 影響拋物線弧度
-offset   = lateralDrift / totalEnergy     → 影響左右偏移
-stability = directionConsistency          → 影響命中機率
-```
-
-## 實作項目
-
-- [ ] 建立 `ShootTouchHandler`，管理 touch down / touch up 狀態。
-- [ ] touch down 時記錄開始時間，通知 MotionWindowBuffer 保持記錄。
-- [ ] touch up 時從 MotionWindowBuffer 取出 window samples。
-- [ ] 建立 `ShootDetector`，輸入 window samples，輸出 ShootEvent 或 null。
-- [ ] 實作 upwardEnergy 計算。
-- [ ] 實作 releasePeak 過零點偵測。
-- [ ] 實作 horizontalNoise 計算。
-- [ ] 實作最低門檻過濾。
-- [ ] 建立 `ShotMotionFeatures` model。
-- [ ] 建立 `ShootEvent` 參數映射。
-- [ ] 手機端 UI 加入投籃按住區域。
-- [ ] 按住時顯示蓄力提示動畫。
-- [ ] 放開後送出 ShootEvent。
-- [ ] 建立 2D 拋物線動畫。
-- [ ] 建立籃框命中區。
-- [ ] 判斷進球、短球、過高、偏左、偏右。
-- [ ] 加入限時投籃模式。
+- RoomPage start basketball。
+- BasketballGamePage broadcast RoomStateEvent。
+- 手機可 restart/back。
+- 多人 leaderboard。
 
 ## 驗收標準
 
-- [ ] 玩家按住螢幕做投籃動作並放開後，電腦端會顯示球飛向籃框。
-- [ ] 不同 power 與 angle 會產生不同球路。
-- [ ] 沒有按住螢幕時，任何動作都不會觸發投籃。
-- [ ] 按住螢幕但沒做投籃動作（例如靜止不動或橫甩），放開後不會產生 ShootEvent。
-- [ ] 球通過籃框命中區時判定進球。
-- [ ] holdDuration < 200ms 的誤觸不會觸發。
+- [ ] 手機選 Basketball 後可從手機或桌面開始遊戲。
+- [ ] 手機按住、投籃、放開後，桌面產生球路。
+- [ ] 不按住時任何揮動不會出手。
+- [ ] 按住但不動直接放開不會出手。
+- [ ] 有效投籃會依 power / angle / offset 產生不同球路。
+- [ ] 球乾淨穿過 rim plane 會得分。
+- [ ] 球撞 rim 會反彈，不會直接消失。
+- [ ] 球撞 backboard 會反彈。
+- [ ] 擦框後仍可能進球。
+- [ ] 連進 10 球後籃框開始左右移動。
+- [ ] Miss 後 streak 歸零但 bestStreak 保留。
+- [ ] 手機可看到 score / streak / last result。
+- [ ] 多人時各玩家獨立 score / streak，桌面顯示排行榜。
+- [ ] `flutter analyze --no-pub` 通過。
+- [ ] `flutter test --no-pub` 通過。
 
 ## 測試方式
 
-- 手動測試：固定距離罰球模式，按住 → 投 → 放開。
-- 單元測試：用模擬 window samples + touch up timestamp 測試 valid / invalid shot。
-- 手動測試：投籃 20 次，記錄觸發率（應 > 90%）。
-- 手動測試：不按螢幕做揮動 20 次，確認零誤觸。
-- 手動測試：按住螢幕但不動直接放開 10 次，確認不觸發。
+單元測試：
 
-## 手機端 UI 設計
+- `flutter test test/basketball_physics_test.dart`
+- `flutter test test/shoot_detector_test.dart`
+- `flutter test test/basketball_gameplay_test.dart`
 
-```text
-┌─────────────────────────┐
-│   連線狀態：已連線       │
-│   目前遊戲：Basketball   │
-├─────────────────────────┤
-│                         │
-│    ┌─────────────────┐  │
-│    │                 │  │
-│    │   按住準備投籃   │  │
-│    │   放開 = 出手    │  │
-│    │                 │  │
-│    │  ████████░░░    │  │
-│    │  蓄力中...       │  │
-│    └─────────────────┘  │
-│                         │
-│  上次投籃：進球！🏀      │
-│  力道：0.82  角度：45°   │
-├─────────────────────────┤
-│   [校正] [設定] [返回]   │
-└─────────────────────────┘
-```
+手動測試：
 
-按住區域可以佔螢幕下半部的大面積，方便玩家單手操作。按住時顯示蓄力進度條（基於 hold 時間），讓玩家知道系統已進入投籃準備狀態。
+- 投籃 20 次，確認有效動作觸發率 > 90%。
+- 不按手機畫面揮動 20 次，確認 0 誤觸。
+- 按住但靜止放開 10 次，確認不送 ShootEvent。
+- 故意偏左 / 偏右 / 太短 / 太強，確認 miss 類型合理。
+- 故意擦框，確認球會彈而不是瞬間消失。
+- 連進 10 球後確認籃框開始移動。
 
 ## 後續擴充
 
-- 三分球模式。
-- 移動籃框。
-- 連續投籃挑戰。
-- 雙手投籃偵測（需要兩台手機）。
-- 進階出手角度分析。
+- 60 秒限時模式。
+- 三分線 / 遠距離模式。
+- 風向或移動出手點。
+- 連進加倍得分。
+- 球網變形動畫。
+- 不同玩家球色。
+- Leader-only start/restart 或多人 ready/vote。
