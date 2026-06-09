@@ -52,7 +52,9 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   final MotionWindowBuffer _shotMotionBuffer = MotionWindowBuffer(
     capacity: 140,
   );
-  final ShootDetector _shootDetector = const ShootDetector();
+  final ShootDetector _shootDetector = const ShootDetector(
+    minHoldDurationMs: 0,
+  );
   late final MotionTrailStreamer _motionTrailStreamer = MotionTrailStreamer(
     playerId: _playerId,
     onEvent: (event) {
@@ -78,7 +80,6 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   StreamSubscription<FusedMotionSnapshot>? _fusedMotionSubscription;
   StreamSubscription<MotionEvent>? _clientEventSubscription;
   Timer? _trailRateTimer;
-  Timer? _shotHoldUiTimer;
   FeedbackEvent? _lastFeedback;
   bool _showFeedbackOverlay = false;
   Timer? _feedbackOverlayTimer;
@@ -173,7 +174,6 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     unawaited(_fusedMotionSubscription?.cancel());
     unawaited(_clientEventSubscription?.cancel());
     _trailRateTimer?.cancel();
-    _shotHoldUiTimer?.cancel();
     _feedbackOverlayTimer?.cancel();
     unawaited(_udpClient.disconnect());
     unawaited(_client.disconnect());
@@ -414,12 +414,11 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       return;
     }
 
-    _shotMotionBuffer.clear();
     final now = DateTime.now();
     setState(() {
       _isShotHolding = true;
       _shotHoldStartedAt = now;
-      _lastShotStatus = 'Aiming';
+      _lastShotStatus = 'Release to shoot';
       _errorMessage = null;
     });
     _send(
@@ -427,12 +426,6 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       updateLastEvent: false,
     );
     unawaited(HapticFeedback.selectionClick());
-    _shotHoldUiTimer?.cancel();
-    _shotHoldUiTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
-      if (mounted && _isShotHolding) {
-        setState(() {});
-      }
-    });
   }
 
   void _releaseShotHold({bool cancelled = false}) {
@@ -443,8 +436,6 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
 
     final now = DateTime.now();
     final holdDurationMs = now.difference(startedAt).inMilliseconds;
-    _shotHoldUiTimer?.cancel();
-    _shotHoldUiTimer = null;
     _send(
       ShootHoldEvent(playerId: _playerId, timestamp: now, pressed: false),
       updateLastEvent: false,
@@ -529,16 +520,6 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   bool get _isBasketballSelected {
     return (_roomState?.selectedGame ?? GameId.motionSaber) ==
         GameId.basketball;
-  }
-
-  double get _shotHoldProgress {
-    final startedAt = _shotHoldStartedAt;
-    if (!_isShotHolding || startedAt == null) {
-      return 0;
-    }
-    return (DateTime.now().difference(startedAt).inMilliseconds / 1200)
-        .clamp(0.0, 1.0)
-        .toDouble();
   }
 
   void _setSensitivity(SensitivityLevel level) {
@@ -673,7 +654,6 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     _BasketballShotPad(
                       isEnabled: isConnected && _isMotionActive,
                       isHolding: _isShotHolding,
-                      chargeProgress: _shotHoldProgress,
                       lastStatus: _lastShotStatus,
                       lastShot: _lastShotEvent,
                       score: _roomState?.scoreForPlayer(_playerId),
@@ -1046,7 +1026,6 @@ class _BasketballShotPad extends StatelessWidget {
   const _BasketballShotPad({
     required this.isEnabled,
     required this.isHolding,
-    required this.chargeProgress,
     required this.lastStatus,
     required this.lastShot,
     required this.score,
@@ -1057,7 +1036,6 @@ class _BasketballShotPad extends StatelessWidget {
 
   final bool isEnabled;
   final bool isHolding;
-  final double chargeProgress;
   final String lastStatus;
   final ShootEvent? lastShot;
   final PlayerScoreSnapshot? score;
@@ -1080,6 +1058,7 @@ class _BasketballShotPad extends StatelessWidget {
           ? activeColor.withValues(alpha: isHolding ? 0.95 : 0.82)
           : theme.colorScheme.surfaceContainerHighest,
       child: Listener(
+        behavior: HitTestBehavior.opaque,
         onPointerDown: isEnabled ? (_) => onHoldStart() : null,
         onPointerUp: isEnabled ? (_) => onHoldEnd() : null,
         onPointerCancel: isEnabled ? (_) => onHoldCancel() : null,
@@ -1115,7 +1094,7 @@ class _BasketballShotPad extends StatelessWidget {
                 const SizedBox(height: 22),
                 Center(
                   child: Text(
-                    isHolding ? 'RELEASE TO SHOOT' : 'HOLD TO AIM',
+                    isHolding ? 'RELEASE' : 'SHOOT',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       color: foreground,
                       fontWeight: FontWeight.w900,
@@ -1123,17 +1102,7 @@ class _BasketballShotPad extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 18),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    minHeight: 8,
-                    value: isHolding ? chargeProgress : 0,
-                    backgroundColor: foreground.withValues(alpha: 0.22),
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 28),
                 Row(
                   children: [
                     Expanded(

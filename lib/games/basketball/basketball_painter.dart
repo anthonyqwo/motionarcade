@@ -109,17 +109,20 @@ class BasketballPainter extends CustomPainter {
   }
 
   void _drawBall(Canvas canvas, BasketballBall? ball, Size size) {
-    final radius = (ball?.radius ?? 22.0) * (ball == null ? 1.15 : 1.45);
+    final depthScale = _ballDepthScale(ball, size);
+    final radius = (ball?.radius ?? 16.0) * depthScale;
     final center = ball?.position ?? Offset(size.width / 2, size.height - 72);
 
     final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.12)
+      ..color = Colors.black.withValues(
+        alpha: 0.07 + (depthScale - 1.05).clamp(0.0, 1.0) * 0.09,
+      )
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
     canvas.drawOval(
       Rect.fromCenter(
         center: Offset(center.dx, size.height * 0.91),
-        width: radius * 2.2,
-        height: radius * 0.7,
+        width: radius * 1.85,
+        height: radius * 0.42,
       ),
       shadowPaint,
     );
@@ -136,6 +139,14 @@ class BasketballPainter extends CustomPainter {
       canvas,
       center - Offset(painter.width / 2, painter.height / 2),
     );
+  }
+
+  double _ballDepthScale(BasketballBall? ball, Size size) {
+    final y = ball?.position.dy ?? size.height - 72;
+    final farY = size.height * 0.22;
+    final nearY = size.height * 0.92;
+    final t = ((y - farY) / (nearY - farY)).clamp(0.0, 1.0).toDouble();
+    return 1.05 + t * 1.35;
   }
 
   @override

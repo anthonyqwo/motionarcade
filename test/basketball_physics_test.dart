@@ -60,6 +60,20 @@ void main() {
       expect(ball.collisionCount, 1);
     });
 
+    test('does not collide with an invisible wall beside the right rim', () {
+      final hoop = hoopFor();
+      final ball = BasketballBall(
+        position: hoop.rightRimCenter.translate(12, -30),
+        velocity: const Offset(140, -20),
+      );
+
+      final result = physics.step(ball, hoop, arena, 0);
+
+      expect(result.collision, BasketballCollisionType.none);
+      expect(ball.velocity.dx, greaterThan(0));
+      expect(ball.collisionCount, 0);
+    });
+
     test('a centered normal shot reaches the basket', () {
       final hoop = hoopFor();
       final ball = physics.launchBall(

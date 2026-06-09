@@ -6,7 +6,7 @@ import '../shared/models/motion_event.dart';
 
 class ShootDetector {
   const ShootDetector({
-    this.minHoldDurationMs = 200,
+    this.minHoldDurationMs = 0,
     this.minSamples = 6,
     this.minUpwardEnergy = 0.16,
     this.minPeakMagnitude = 0.34,

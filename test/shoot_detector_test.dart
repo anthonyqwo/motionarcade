@@ -29,15 +29,26 @@ void main() {
       expect(result.event!.holdDurationMs, 620);
     });
 
-    test('rejects touch taps that are too short', () {
+    test('accepts quick press release when motion is valid', () {
       final result = detector.detect(
         samples: _samples(count: 20),
-        holdDurationMs: 120,
+        holdDurationMs: 24,
+        playerId: 'p1',
+      );
+
+      expect(result.isValid, isTrue);
+      expect(result.event?.holdDurationMs, 24);
+    });
+
+    test('rejects releases without enough motion data', () {
+      final result = detector.detect(
+        samples: _samples(count: 2),
+        holdDurationMs: 24,
         playerId: 'p1',
       );
 
       expect(result.isValid, isFalse);
-      expect(result.reason, contains('longer'));
+      expect(result.reason, contains('data'));
     });
 
     test('rejects mostly sideways throws', () {

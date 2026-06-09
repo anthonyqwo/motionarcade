@@ -128,12 +128,13 @@ class BasketballHoop {
     final movement = difficulty.movementOffset(elapsedSeconds) * scale;
     final rimCenter = Offset(arena.width / 2 + movement, arena.height * 0.29);
     final rimWidth = 74.0 * scale;
-    final boardWidth = 12.0 * scale;
+    final boardWidth = 154.0 * scale;
     final boardHeight = 92.0 * scale;
+    final boardCollisionWidth = 5.0 * scale;
     final backboardRect = Rect.fromLTWH(
-      rimCenter.dx + rimWidth / 2 + 10 * scale,
-      rimCenter.dy - boardHeight * 0.72,
-      boardWidth,
+      rimCenter.dx + boardWidth / 2 - boardCollisionWidth / 2,
+      rimCenter.dy - 30 * scale - boardHeight / 2,
+      boardCollisionWidth,
       boardHeight,
     );
 
@@ -219,7 +220,7 @@ class BasketballPhysics {
         lateral * 260 * scaleX,
         -_lerp(720, 1040, mappedPower) * arc * scaleY,
       ),
-      radius: 14 * math.min(scaleX, scaleY).clamp(0.75, 1.35),
+      radius: 16 * math.min(scaleX, scaleY).clamp(0.75, 1.35),
     );
   }
 
