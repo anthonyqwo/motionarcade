@@ -76,24 +76,25 @@ void main() {
         playerId: 'p1',
         onEvent: (event) => receivedEvent = event,
         downsampleRatio: 1, // process all samples
-        alpha: 1.0,        // no smoothing to verify raw projection
+        alpha: 1.0, // no smoothing to verify raw projection
         idleThreshold: 0.0, // force active rate
         activeIntervalMs: 10,
       );
 
       final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
-      
+
       // Identity quaternion: tip should align with Y axis (0, 1, 0)
-      streamer.onSample(createSample(
-        time: t0,
-        attitude: QuaternionSample.identity,
-      ));
+      streamer.onSample(
+        createSample(time: t0, attitude: QuaternionSample.identity),
+      );
 
       // Trigger a packet send by passing a sample after the active interval
-      streamer.onSample(createSample(
-        time: t0.add(const Duration(milliseconds: 15)),
-        attitude: QuaternionSample.identity,
-      ));
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 15)),
+          attitude: QuaternionSample.identity,
+        ),
+      );
 
       expect(receivedEvent, isNotNull);
       expect(receivedEvent!.samples.length, 2);
@@ -113,14 +114,18 @@ void main() {
       );
 
       final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
-      
+
       // Send 5 samples at 16ms intervals (total 64ms)
       for (int i = 0; i < 5; i++) {
-        streamer.onSample(createSample(time: t0.add(Duration(milliseconds: i * 16))));
+        streamer.onSample(
+          createSample(time: t0.add(Duration(milliseconds: i * 16))),
+        );
       }
-      
+
       // Send a final sample at 116ms (greater than 100ms interval) to force sending
-      streamer.onSample(createSample(time: t0.add(const Duration(milliseconds: 116))));
+      streamer.onSample(
+        createSample(time: t0.add(const Duration(milliseconds: 116))),
+      );
 
       expect(events.length, 1);
       // Samples processed: index 1, 3, 5 (since counter starts at 1 and processes 2, 4, 6)
@@ -155,34 +160,37 @@ void main() {
       // --- Idle Phase: Acc = 0.5 (below 2.0) ---
       // Send samples at 20ms intervals up to 100ms
       for (int i = 0; i < 6; i++) {
-        streamer.onSample(createSample(
-          time: t0.add(Duration(milliseconds: i * 20)),
-          userAccY: 0.5,
-        ));
+        streamer.onSample(
+          createSample(
+            time: t0.add(Duration(milliseconds: i * 20)),
+            userAccY: 0.5,
+          ),
+        );
       }
       // Elapsed is 100ms. Since target interval is 200ms (idle), no packets should be sent yet.
       expect(events, isEmpty);
 
       // Advance to 200ms to trigger the idle packet
-      streamer.onSample(createSample(
-        time: t0.add(const Duration(milliseconds: 200)),
-        userAccY: 0.5,
-      ));
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 200)),
+          userAccY: 0.5,
+        ),
+      );
       expect(events.length, 1);
       events.clear();
       streamer.reset();
 
       // --- Active Phase: Acc = 3.0 (above 2.0) ---
       // Send samples at 20ms intervals
-      streamer.onSample(createSample(
-        time: t0,
-        userAccY: 3.0,
-      ));
+      streamer.onSample(createSample(time: t0, userAccY: 3.0));
       // Second sample at 40ms should trigger packet (elapsed 40ms > activeIntervalMs 33ms)
-      streamer.onSample(createSample(
-        time: t0.add(const Duration(milliseconds: 40)),
-        userAccY: 3.0,
-      ));
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 40)),
+          userAccY: 3.0,
+        ),
+      );
 
       expect(events.length, 1);
     });
@@ -208,7 +216,7 @@ void main() {
       // Let's use simple QuaternionSample to verify EMA math:
       // First sample tipX is 0.0, tipY is 1.0 (identity attitude rotates (0, 1, 0) to (0, 1, 0))
       // So smoothedX = 0.0, smoothedY = 1.0.
-      
+
       // Second sample: we use a quaternion that rotates (0, 1, 0) to something else.
       // E.g., QuaternionSample(x: 0, y: 0, z: sin(pi/4), w: cos(pi/4)) which is Z-rotation of 90 degrees.
       // It rotates (0, 1, 0) to (-1, 0, 0).
@@ -216,30 +224,31 @@ void main() {
       // EMA with alpha = 0.5:
       // smoothedX = 0.0 * 0.5 + (-1.0) * 0.5 = -0.5
       // smoothedY = 1.0 * 0.5 + 0.0 * 0.5 = 0.5
-      
+
       final rotZ90 = QuaternionSample(
         x: 0,
         y: 0,
         z: -0.70710678118, // sin(-45 deg)
-        w: 0.70710678118,  // cos(-45 deg)
+        w: 0.70710678118, // cos(-45 deg)
       );
 
-      streamer.onSample(createSample(
-        time: t0,
-        attitude: QuaternionSample.identity,
-      ));
+      streamer.onSample(
+        createSample(time: t0, attitude: QuaternionSample.identity),
+      );
 
-      streamer.onSample(createSample(
-        time: t0.add(const Duration(milliseconds: 20)),
-        attitude: rotZ90,
-      ));
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 20)),
+          attitude: rotZ90,
+        ),
+      );
 
       expect(receivedEvent, isNotNull);
       final samples = receivedEvent!.samples;
       expect(samples.length, 2);
       expect(samples[0].tipX, 0.0);
       expect(samples[0].tipY, 1.0);
-      
+
       // Close approximation to 0.5 and 0.5
       expect(samples[1].tipX, closeTo(0.5, 0.01));
       expect(samples[1].tipY, closeTo(0.5, 0.01));
@@ -247,7 +256,7 @@ void main() {
 
     test('projects relative attitude onto calibrated grip frame', () {
       final calibrationService = CalibrationService();
-      
+
       // Calibrate with neutral pose pointing forward, but tilted flat
       // gravity = (0, -9.8, 0)
       final neutralSample = FusedMotionSample(
@@ -259,7 +268,7 @@ void main() {
         source: 'test',
       );
       calibrationService.calibrateFusedMotion(neutralSample);
-      
+
       MotionTrailEvent? receivedEvent;
       final streamer = MotionTrailStreamer(
         playerId: 'p1',
@@ -272,27 +281,31 @@ void main() {
       );
 
       final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
-      
+
       // Let's rotate the phone UP (pitch up)
       // Since it's calibrated flat, tilting UP (around X axis) rotates Y towards Z.
       // E.g., Quaternion rotating +30 degrees around X.
       // Quaternion = (sin(15), 0, 0, cos(15)) = (0.2588, 0, 0, 0.9659)
-      const pitchUp = QuaternionSample(x: 0.2588190451, y: 0, z: 0, w: 0.9659258263);
-      
+      const pitchUp = QuaternionSample(
+        x: 0.2588190451,
+        y: 0,
+        z: 0,
+        w: 0.9659258263,
+      );
+
       // Let's process the sample
-      streamer.onSample(createSample(
-        time: t0,
-        attitude: pitchUp,
-      ));
-      
-      streamer.onSample(createSample(
-        time: t0.add(const Duration(milliseconds: 15)),
-        attitude: pitchUp,
-      ));
+      streamer.onSample(createSample(time: t0, attitude: pitchUp));
+
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 15)),
+          attitude: pitchUp,
+        ),
+      );
 
       expect(receivedEvent, isNotNull);
       final samples = receivedEvent!.samples;
-      
+
       // The rotated vector rotated = pitchUp.rotate((0, 1, 0))
       // With +30 deg rotation around X, (0, 1, 0) rotates to (0, cos(30), sin(30)) = (0, 0.866, 0.5)
       // Since calibration neutral had gravity along -Y, upAxis is +Y, forwardAxis is +Z, rightAxis is +X.
@@ -304,7 +317,7 @@ void main() {
 
     test('projects relative attitude onto calibrated knife grip frame', () {
       final calibrationService = CalibrationService();
-      
+
       // Calibrate with neutral pose in knife grip (gravity along +X)
       // gravity = (9.8, 0, 0)
       final neutralSample = FusedMotionSample(
@@ -316,7 +329,7 @@ void main() {
         source: 'test',
       );
       calibrationService.calibrateFusedMotion(neutralSample);
-      
+
       MotionTrailEvent? receivedEvent;
       final streamer = MotionTrailStreamer(
         playerId: 'p1',
@@ -329,25 +342,29 @@ void main() {
       );
 
       final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
-      
+
       // Let's simulate a physical pitch DOWN.
       // On the actual device, the native attitude is inverted, so a physical pitch down
       // returns a native Z rotation of +30 degrees.
-      const pitchDown = QuaternionSample(x: 0, y: 0, z: 0.2588190451, w: 0.9659258263);
-      
-      streamer.onSample(createSample(
-        time: t0,
-        attitude: pitchDown,
-      ));
-      
-      streamer.onSample(createSample(
-        time: t0.add(const Duration(milliseconds: 15)),
-        attitude: pitchDown,
-      ));
+      const pitchDown = QuaternionSample(
+        x: 0,
+        y: 0,
+        z: 0.2588190451,
+        w: 0.9659258263,
+      );
+
+      streamer.onSample(createSample(time: t0, attitude: pitchDown));
+
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 15)),
+          attitude: pitchDown,
+        ),
+      );
 
       expect(receivedEvent, isNotNull);
       final samples = receivedEvent!.samples;
-      
+
       // Rotated vector: rotated = pitchDown.rotate((0, 1, 0))
       // Since it is Z rotation of -30 deg: (0, 1, 0) rotates to (sin(30), cos(30), 0) = (0.5, 0.866, 0)
       // Since gravity = (9.8, 0, 0):
@@ -362,72 +379,87 @@ void main() {
       expect(samples[0].tipY, closeTo(0.5, 0.01));
     });
 
-    test('projects relative attitude onto calibrated knife grip frame with non-identity initial attitude', () {
-      final calibrationService = CalibrationService();
-      
-      // Calibrate with neutral pose rotated 45 degrees around Y, in knife grip (gravity along +X)
-      // gravity = (9.8, 0, 0)
-      final halfTurnY = QuaternionSample(x: 0, y: math.sin(math.pi / 8), z: 0, w: math.cos(math.pi / 8));
-      final neutralSample = FusedMotionSample(
-        attitude: halfTurnY,
-        gravity: const Vector3Sample(x: 9.80665, y: 0, z: 0),
-        userAcceleration: const Vector3Sample(x: 0, y: 0, z: 0),
-        rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
-        timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
-        source: 'test',
-      );
-      calibrationService.calibrateFusedMotion(neutralSample);
-      
-      MotionTrailEvent? receivedEvent;
-      final streamer = MotionTrailStreamer(
-        playerId: 'p1',
-        onEvent: (event) => receivedEvent = event,
-        downsampleRatio: 1,
-        alpha: 1.0,
-        idleThreshold: 0.0,
-        activeIntervalMs: 10,
-        calibrationService: calibrationService,
-      );
+    test(
+      'projects relative attitude onto calibrated knife grip frame with non-identity initial attitude',
+      () {
+        final calibrationService = CalibrationService();
 
-      final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
-      
-      // Rotate the current attitude: relative rotation is a Z rotation of +30 degrees (pitch down)
-      // Since relativeRotation = attitude * initialAttitude.inverse:
-      // attitude = relativeRotation * initialAttitude
-      final relativeRot = QuaternionSample(x: 0, y: 0, z: 0.2588190451, w: 0.9659258263); // Z rotation of +30 degrees
-      final currentAttitude = halfTurnY * relativeRot;
-      
-      final rawSample = FusedMotionSample(
-        attitude: currentAttitude,
-        gravity: const Vector3Sample(x: 9.80665, y: 0, z: 0),
-        userAcceleration: const Vector3Sample(x: 0, y: 0, z: 0),
-        rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
-        timestamp: t0,
-        source: 'test',
-      );
-      
-      // Apply calibration to get the controller sample
-      final calibratedSample = calibrationService.applyToFusedMotion(rawSample);
-      
-      streamer.onSample(calibratedSample);
-      
-      // Force batch send
-      final nextSample = FusedMotionSample(
-        attitude: currentAttitude,
-        gravity: const Vector3Sample(x: 9.80665, y: 0, z: 0),
-        userAcceleration: const Vector3Sample(x: 0, y: 0, z: 0),
-        rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
-        timestamp: t0.add(const Duration(milliseconds: 15)),
-        source: 'test',
-      );
-      streamer.onSample(calibrationService.applyToFusedMotion(nextSample));
+        // Calibrate with neutral pose rotated 45 degrees around Y, in knife grip (gravity along +X)
+        // gravity = (9.8, 0, 0)
+        final halfTurnY = QuaternionSample(
+          x: 0,
+          y: math.sin(math.pi / 8),
+          z: 0,
+          w: math.cos(math.pi / 8),
+        );
+        final neutralSample = FusedMotionSample(
+          attitude: halfTurnY,
+          gravity: const Vector3Sample(x: 9.80665, y: 0, z: 0),
+          userAcceleration: const Vector3Sample(x: 0, y: 0, z: 0),
+          rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
+          timestamp: DateTime.fromMillisecondsSinceEpoch(1000),
+          source: 'test',
+        );
+        calibrationService.calibrateFusedMotion(neutralSample);
 
-      expect(receivedEvent, isNotNull);
-      final samples = receivedEvent!.samples;
-      
-      // tipY = -0.5, tipX = 0.0
-      expect(samples[0].tipX, closeTo(0.0, 0.01));
-      expect(samples[0].tipY, closeTo(0.5, 0.01));
-    });
+        MotionTrailEvent? receivedEvent;
+        final streamer = MotionTrailStreamer(
+          playerId: 'p1',
+          onEvent: (event) => receivedEvent = event,
+          downsampleRatio: 1,
+          alpha: 1.0,
+          idleThreshold: 0.0,
+          activeIntervalMs: 10,
+          calibrationService: calibrationService,
+        );
+
+        final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
+
+        // Rotate the current attitude: relative rotation is a Z rotation of +30 degrees (pitch down)
+        // Since relativeRotation = attitude * initialAttitude.inverse:
+        // attitude = relativeRotation * initialAttitude
+        final relativeRot = QuaternionSample(
+          x: 0,
+          y: 0,
+          z: 0.2588190451,
+          w: 0.9659258263,
+        ); // Z rotation of +30 degrees
+        final currentAttitude = halfTurnY * relativeRot;
+
+        final rawSample = FusedMotionSample(
+          attitude: currentAttitude,
+          gravity: const Vector3Sample(x: 9.80665, y: 0, z: 0),
+          userAcceleration: const Vector3Sample(x: 0, y: 0, z: 0),
+          rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
+          timestamp: t0,
+          source: 'test',
+        );
+
+        // Apply calibration to get the controller sample
+        final calibratedSample = calibrationService.applyToFusedMotion(
+          rawSample,
+        );
+
+        streamer.onSample(calibratedSample);
+
+        // Force batch send
+        final nextSample = FusedMotionSample(
+          attitude: currentAttitude,
+          gravity: const Vector3Sample(x: 9.80665, y: 0, z: 0),
+          userAcceleration: const Vector3Sample(x: 0, y: 0, z: 0),
+          rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
+          timestamp: t0.add(const Duration(milliseconds: 15)),
+          source: 'test',
+        );
+        streamer.onSample(calibrationService.applyToFusedMotion(nextSample));
+
+        expect(receivedEvent, isNotNull);
+        final samples = receivedEvent!.samples;
+
+        // tipY = -0.5, tipX = 0.0
+        expect(samples[0].tipX, closeTo(0.0, 0.01));
+        expect(samples[0].tipY, closeTo(0.5, 0.01));
+      },
+    );
   });
 }
