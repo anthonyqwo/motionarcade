@@ -65,6 +65,7 @@ void main() {
         final state = SaberGameState(
           server: mockServer,
           initialPlayers: players,
+          countdownSeconds: 0,
         );
         addTearDown(state.dispose);
 
@@ -88,8 +89,10 @@ void main() {
         server: mockServer,
         initialPlayers: players,
         random: math.Random(4),
+        countdownSeconds: 0,
       );
       addTearDown(state.dispose);
+      state.speed = 0;
 
       final positions = <String>{};
       String? previousPosition;
@@ -116,6 +119,7 @@ void main() {
         server: mockServer,
         initialPlayers: players,
         motionEvents: motionEvents.stream,
+        countdownSeconds: 0,
       );
       addTearDown(state.dispose);
       addTearDown(motionEvents.close);
@@ -175,6 +179,143 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(state.lastSlash, matchingSlash);
+    });
+
+    test('countdown delays spawning and starts the run cleanly', () {
+      final state = SaberGameState(
+        server: mockServer,
+        initialPlayers: players,
+        random: math.Random(1),
+      );
+      addTearDown(state.dispose);
+
+      expect(state.phase, equals(SaberRunPhase.countdown));
+      expect(state.targets, isEmpty);
+
+      state.update(1.0);
+      expect(state.phase, equals(SaberRunPhase.countdown));
+      expect(state.targets, isEmpty);
+      expect(state.survivedSeconds, equals(0.0));
+
+      state.update(2.1);
+      expect(state.phase, equals(SaberRunPhase.playing));
+      expect(state.countdownRemaining, equals(0.0));
+      expect(state.survivedSeconds, closeTo(0.1, 0.001));
+      expect(state.targets, isNotEmpty);
+    });
+
+    test('three shared misses end the run and stop new spawns', () {
+      final state = SaberGameState(
+        server: mockServer,
+        initialPlayers: players,
+        countdownSeconds: 0,
+      );
+      addTearDown(state.dispose);
+
+      for (var i = 0; i < 3; i++) {
+        state.targets.add(
+          SaberTarget(
+            id: 'miss_$i',
+            direction: MotionDirection.up,
+            lane: 0,
+            spawnTime: DateTime.fromMillisecondsSinceEpoch(1000 + i),
+            depth: 1.05,
+          ),
+        );
+        state.update(0.1);
+      }
+
+      expect(state.sharedLives, equals(0));
+      expect(state.teamMisses, equals(3));
+      expect(state.isGameOver, isTrue);
+      expect(state.gameOverReason, equals(SaberGameOverReason.outOfLives));
+
+      final targetCount = state.targets.length;
+      state.update(5.0);
+      expect(state.targets.length, lessThanOrEqualTo(targetCount));
+    });
+
+    test(
+      'wrong direction consumes a shared life and marks that player miss',
+      () async {
+        final motionEvents = StreamController<MotionEvent>.broadcast();
+        final state = SaberGameState(
+          server: mockServer,
+          initialPlayers: players,
+          motionEvents: motionEvents.stream,
+          countdownSeconds: 0,
+        );
+        addTearDown(state.dispose);
+        addTearDown(motionEvents.close);
+
+        state.targets.add(
+          SaberTarget(
+            id: 'wrong_direction_target',
+            direction: MotionDirection.right,
+            lane: 0,
+            spawnTime: DateTime.fromMillisecondsSinceEpoch(1000),
+            depth: 0.9,
+          ),
+        );
+
+        motionEvents.add(
+          SlashEvent(
+            playerId: 'p1',
+            timestamp: DateTime.fromMillisecondsSinceEpoch(1100),
+            direction: MotionDirection.left,
+            power: 0.7,
+            durationMs: 100,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(state.sharedLives, equals(2));
+        expect(state.playerStats.single.misses, equals(1));
+        expect(state.scoring.combo, equals(0));
+        expect(state.targets.single.status, equals(SaberTargetStatus.missed));
+      },
+    );
+
+    test('multiplayer keeps shared lives and individual scores', () async {
+      final motionEvents = StreamController<MotionEvent>.broadcast();
+      final state = SaberGameState(
+        server: mockServer,
+        initialPlayers: [
+          const Player(id: 'p1', name: 'Player 1', deviceLabel: 'phone'),
+          const Player(id: 'p2', name: 'Player 2', deviceLabel: 'phone'),
+        ],
+        motionEvents: motionEvents.stream,
+        countdownSeconds: 0,
+      );
+      addTearDown(state.dispose);
+      addTearDown(motionEvents.close);
+
+      state.targets.add(
+        SaberTarget(
+          id: 'p2_target',
+          direction: MotionDirection.up,
+          lane: 0,
+          spawnTime: DateTime.fromMillisecondsSinceEpoch(1000),
+          depth: 0.93,
+        ),
+      );
+
+      motionEvents.add(
+        SlashEvent(
+          playerId: 'p2',
+          timestamp: DateTime.fromMillisecondsSinceEpoch(1100),
+          direction: MotionDirection.up,
+          power: 0.8,
+          durationMs: 100,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(state.sharedLives, equals(3));
+      expect(state.scoringForPlayer('p1').score, equals(0));
+      expect(state.scoringForPlayer('p2').score, greaterThan(0));
+      expect(state.playerStats.first.player.id, equals('p2'));
+      expect(state.playerStats.first.hits, equals(1));
     });
   });
 }

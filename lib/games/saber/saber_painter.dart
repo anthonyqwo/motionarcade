@@ -535,8 +535,6 @@ class SaberPainter extends CustomPainter {
         return const Color(0xFF22C55E);
       case MotionDirection.backward:
         return const Color(0xFFFF4EBD);
-      default:
-        return Colors.white;
     }
   }
 

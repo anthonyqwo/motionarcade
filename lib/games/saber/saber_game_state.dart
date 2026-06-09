@@ -10,17 +10,53 @@ import '../../shared/visual/trail_point_buffer.dart';
 import '../../shared/visual/trail_renderer.dart';
 import 'saber_target.dart';
 
+enum SaberRunPhase { countdown, playing, gameOver }
+
+enum SaberGameOverReason { outOfLives }
+
+class SaberPlayerStats {
+  const SaberPlayerStats({
+    required this.player,
+    required this.score,
+    required this.combo,
+    required this.maxCombo,
+    required this.multiplier,
+    required this.hits,
+    required this.misses,
+  });
+
+  final Player player;
+  final int score;
+  final int combo;
+  final int maxCombo;
+  final double multiplier;
+  final int hits;
+  final int misses;
+}
+
 class SaberGameState extends ChangeNotifier {
   SaberGameState({
     required this.server,
     required List<Player> initialPlayers,
     Stream<MotionEvent>? motionEvents,
     math.Random? random,
+    double countdownSeconds = _defaultCountdownSeconds,
   }) : players = List.from(initialPlayers),
-       _random = random {
+       _random = random,
+       _phase = countdownSeconds > 0
+           ? SaberRunPhase.countdown
+           : SaberRunPhase.playing,
+       _countdownRemaining = countdownSeconds,
+       _sharedLives = _initialSharedLives {
     _eventSub = server.events.listen(_handleEvent);
     _motionEventSub = motionEvents?.listen(_handleEvent);
+    for (final player in players) {
+      scoringForPlayer(player.id);
+    }
   }
+
+  static const int _initialSharedLives = 3;
+  static const double _defaultCountdownSeconds = 3.0;
 
   static const List<({double lane, double row})> _spawnPositions = [
     (lane: -0.95, row: -0.55),
@@ -38,8 +74,10 @@ class SaberGameState extends ChangeNotifier {
   final WebSocketServerService server;
   final List<Player> players;
   final List<SaberTarget> targets = [];
-  final ScoringSystem scoring = ScoringSystem();
   final TrailPointBuffer _trailBuffer = TrailPointBuffer();
+  final Map<String, ScoringSystem> _scoringByPlayer = {};
+  final Map<String, int> _hitsByPlayer = {};
+  final Map<String, int> _missesByPlayer = {};
   math.Random? _random;
 
   StreamSubscription? _eventSub;
@@ -50,10 +88,74 @@ class SaberGameState extends ChangeNotifier {
   double _lastSpawnTime = 0.0;
   final double _spawnIntervalSeconds = 1.65;
   int? _lastSpawnPositionIndex;
+  SaberRunPhase? _phase;
+  SaberGameOverReason? _gameOverReason;
+  double? _countdownRemaining;
+  double? _survivedSeconds;
+  int? _sharedLives;
+  int? _teamMisses;
 
   SlashEvent? lastSlash;
   String lastEventLabel = 'none';
   List<TrailRenderPoint> get trailPoints => _trailBuffer.points;
+  SaberRunPhase get phase => _phase ?? SaberRunPhase.playing;
+  SaberGameOverReason? get gameOverReason => _gameOverReason;
+  int get sharedLives => _sharedLives ?? _initialSharedLives;
+  int get maxSharedLives => _initialSharedLives;
+  int get teamMisses => _teamMisses ?? 0;
+  double get countdownRemaining => (_countdownRemaining ?? 0).clamp(0.0, 99.0);
+  double get survivedSeconds => _survivedSeconds ?? 0.0;
+  bool get isPlaying => phase == SaberRunPhase.playing;
+  bool get isGameOver => phase == SaberRunPhase.gameOver;
+
+  ScoringSystem get scoring {
+    final playerId = players.isEmpty ? 'solo' : players.first.id;
+    return scoringForPlayer(playerId);
+  }
+
+  List<SaberPlayerStats> get playerStats {
+    return [
+      for (final player in players)
+        SaberPlayerStats(
+          player: player,
+          score: scoringForPlayer(player.id).score,
+          combo: scoringForPlayer(player.id).combo,
+          maxCombo: scoringForPlayer(player.id).maxCombo,
+          multiplier: scoringForPlayer(player.id).multiplier,
+          hits: _hitsByPlayer[player.id] ?? 0,
+          misses: _missesByPlayer[player.id] ?? 0,
+        ),
+    ]..sort((a, b) => b.score.compareTo(a.score));
+  }
+
+  ScoringSystem scoringForPlayer(String playerId) {
+    return _scoringByPlayer.putIfAbsent(playerId, ScoringSystem.new);
+  }
+
+  void restartRun({double countdownSeconds = _defaultCountdownSeconds}) {
+    targets.clear();
+    _trailBuffer.clear();
+    for (final scoring in _scoringByPlayer.values) {
+      scoring.reset();
+    }
+    _hitsByPlayer.clear();
+    _missesByPlayer.clear();
+    _sharedLives = _initialSharedLives;
+    _teamMisses = 0;
+    _survivedSeconds = 0.0;
+    _elapsedTime = 0.0;
+    _lastSpawnTime = 0.0;
+    _targetCounter = 0;
+    _lastSpawnPositionIndex = null;
+    _gameOverReason = null;
+    _countdownRemaining = countdownSeconds;
+    _phase = countdownSeconds > 0
+        ? SaberRunPhase.countdown
+        : SaberRunPhase.playing;
+    lastSlash = null;
+    lastEventLabel = 'restart';
+    notifyListeners();
+  }
 
   @override
   void dispose() {
@@ -66,34 +168,41 @@ class SaberGameState extends ChangeNotifier {
     _elapsedTime += dt;
     final now = DateTime.now();
     bool needsNotify = false;
+    var playingDt = isPlaying ? dt : 0.0;
 
-    // Update targets
+    if (phase == SaberRunPhase.countdown) {
+      final previousCountdown = countdownRemaining;
+      _countdownRemaining = countdownRemaining - dt;
+      if (countdownRemaining <= 0) {
+        _phase = SaberRunPhase.playing;
+        _countdownRemaining = 0;
+        _lastSpawnTime = _elapsedTime - _spawnIntervalSeconds;
+        playingDt = math.max(0.0, dt - previousCountdown);
+      }
+      needsNotify = true;
+    }
+
+    if (playingDt > 0) {
+      _survivedSeconds = survivedSeconds + playingDt;
+    }
+
     for (final target in List<SaberTarget>.from(targets)) {
       target.update(dt, speed);
 
-      // If a target is active and passes depth 1.0 without being hit, it's a Miss!
-      if (target.status == SaberTargetStatus.active && target.depth >= 1.0) {
+      if (isPlaying &&
+          target.status == SaberTargetStatus.active &&
+          target.depth >= 1.0) {
         target.markMissed();
-        scoring.registerHit(FeedbackResult.miss);
+        _registerSharedMiss(message: 'Missed target!');
         needsNotify = true;
-
-        _sendFeedbackToAll(
-          result: FeedbackResult.miss,
-          haptic: HapticPattern.miss,
-          message: 'Missed target!',
-          durationMs: 150,
-        );
       }
     }
 
-    // Clean up targets that are finished animating or missed
     targets.removeWhere((t) => t.isFinished);
 
     _trailBuffer.prune(now);
 
-    // Check if we should spawn a target after updating existing targets so new
-    // targets do not jump forward by a whole frame interval.
-    if (_elapsedTime - _lastSpawnTime >= _spawnIntervalSeconds) {
+    if (isPlaying && _elapsedTime - _lastSpawnTime >= _spawnIntervalSeconds) {
       _spawnTarget(now);
       _lastSpawnTime = _elapsedTime;
       needsNotify = true;
@@ -163,6 +272,7 @@ class SaberGameState extends ChangeNotifier {
     } else {
       players[index] = p;
     }
+    scoringForPlayer(event.playerId);
     lastEventLabel = 'Join: ${event.name}';
     notifyListeners();
   }
@@ -187,6 +297,10 @@ class SaberGameState extends ChangeNotifier {
   }
 
   void _handleSlash(SlashEvent event) {
+    if (!isPlaying) {
+      return;
+    }
+
     lastEventLabel = 'Slash: ${event.direction.name}';
 
     SaberTarget? closestTarget;
@@ -240,7 +354,9 @@ class SaberGameState extends ChangeNotifier {
           _ => math.pi / 4,
         };
 
-        scoring.registerHit(rating);
+        scoringForPlayer(event.playerId).registerHit(rating);
+        _hitsByPlayer[event.playerId] =
+            (_hitsByPlayer[event.playerId] ?? 0) + 1;
 
         server.sendToPlayer(
           event.playerId,
@@ -255,7 +371,11 @@ class SaberGameState extends ChangeNotifier {
         );
       } else {
         closestTarget.markMissed();
-        scoring.registerHit(FeedbackResult.miss);
+        _registerSharedMiss(
+          playerId: event.playerId,
+          message: 'Wrong direction!',
+          broadcast: false,
+        );
 
         server.sendToPlayer(
           event.playerId,
@@ -271,6 +391,40 @@ class SaberGameState extends ChangeNotifier {
       }
     }
     notifyListeners();
+  }
+
+  void _registerSharedMiss({
+    String? playerId,
+    required String message,
+    bool broadcast = true,
+  }) {
+    if (!isPlaying) {
+      return;
+    }
+
+    _teamMisses = teamMisses + 1;
+    _sharedLives = math.max(0, sharedLives - 1);
+
+    if (playerId != null) {
+      scoringForPlayer(playerId).registerHit(FeedbackResult.miss);
+      _missesByPlayer[playerId] = (_missesByPlayer[playerId] ?? 0) + 1;
+    }
+
+    if (broadcast) {
+      _sendFeedbackToAll(
+        result: FeedbackResult.miss,
+        haptic: HapticPattern.miss,
+        message: message,
+        durationMs: 150,
+      );
+    }
+
+    lastEventLabel = message;
+    if (sharedLives <= 0) {
+      _phase = SaberRunPhase.gameOver;
+      _gameOverReason = SaberGameOverReason.outOfLives;
+      lastEventLabel = 'Game over';
+    }
   }
 
   void _sendFeedbackToAll({

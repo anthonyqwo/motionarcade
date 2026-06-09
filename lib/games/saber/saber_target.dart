@@ -26,7 +26,7 @@ class SaberTarget {
   double cutProgress; // 0.0 (uncut) to 1.0 (fully split)
   // Angle at which the block was cut, used for split visual orientation.
   double cutAngle;
-  double? _row;
+  final double? _row;
   double? _missProgress;
 
   // -1.0 for upper targets, 0.0 center, 1.0 lower targets.

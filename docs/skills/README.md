@@ -9,6 +9,14 @@
 - 讓驗收不只看頁面是否完成，也能確認底層能力是否可用。
 - 方便後續擴充 Basketball、Ping Pong、多人模式與更多體感玩法。
 
+## 多人模式大方向
+
+- 連線與輸入：多支手機可同時加入同一 room，各自送出 motion trail / slash event。
+- 關卡狀態：合作模式優先，target、節奏、shared lives 屬於全隊共同狀態。
+- 計分狀態：每位玩家獨立 score、combo、max combo、hit/miss 統計，UI 以 leaderboard 呈現。
+- Saber 第一版多人規則：全隊共用 3 命，任一玩家 Miss 或砍錯方向都扣 shared life；命中只加該玩家分數。
+- 擴充方向：保留 shared lives 不變，未來可加入隊伍總分、玩家 MVP、競爭排名或不同玩家顏色 trail。
+
 ## 狀態定義
 
 | 狀態 | 意義 |
