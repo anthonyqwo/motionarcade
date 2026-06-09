@@ -17,7 +17,7 @@ class SaberGameState extends ChangeNotifier {
     Stream<MotionEvent>? motionEvents,
     math.Random? random,
   }) : players = List.from(initialPlayers),
-       _random = random ?? math.Random() {
+       _random = random {
     _eventSub = server.events.listen(_handleEvent);
     _motionEventSub = motionEvents?.listen(_handleEvent);
   }
@@ -40,7 +40,7 @@ class SaberGameState extends ChangeNotifier {
   final List<SaberTarget> targets = [];
   final ScoringSystem scoring = ScoringSystem();
   final TrailPointBuffer _trailBuffer = TrailPointBuffer();
-  final math.Random _random;
+  math.Random? _random;
 
   StreamSubscription? _eventSub;
   StreamSubscription? _motionEventSub;
@@ -113,9 +113,10 @@ class SaberGameState extends ChangeNotifier {
       MotionDirection.left,
       MotionDirection.right,
     ];
-    final direction = directions[_random.nextInt(directions.length)];
+    final random = _random ??= math.Random();
+    final direction = directions[random.nextInt(directions.length)];
 
-    var positionIndex = _random.nextInt(_spawnPositions.length);
+    var positionIndex = random.nextInt(_spawnPositions.length);
     final lastIndex = _lastSpawnPositionIndex;
     if (lastIndex != null &&
         positionIndex == lastIndex &&

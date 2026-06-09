@@ -8,25 +8,33 @@ class SaberTarget {
     required this.direction,
     required this.lane,
     required this.spawnTime,
-    this.row = 0.0,
+    double row = 0.0,
     this.depth = 0.0,
     this.status = SaberTargetStatus.active,
     this.cutProgress = 0.0,
     this.cutAngle = 0.0,
-    this.missProgress = 0.0,
-  });
+    double missProgress = 0.0,
+  }) : _row = row,
+       _missProgress = missProgress;
 
   final String id;
   final MotionDirection direction;
   final double lane; // -1.0 for Left, 0.0 for Center, 1.0 for Right
-  final double row; // -1.0 for upper targets, 0.0 center, 1.0 lower targets
   final DateTime spawnTime;
   double depth; // 0.0 (far) to 1.0 (near/hit zone)
   SaberTargetStatus status;
   double cutProgress; // 0.0 (uncut) to 1.0 (fully split)
   // Angle at which the block was cut, used for split visual orientation.
   double cutAngle;
-  double missProgress; // 0.0 (fresh miss) to 1.0 (fully faded)
+  double? _row;
+  double? _missProgress;
+
+  // -1.0 for upper targets, 0.0 center, 1.0 lower targets.
+  double get row => _row ?? 0.0;
+
+  // 0.0 (fresh miss) to 1.0 (fully faded).
+  double get missProgress => _missProgress ?? 0.0;
+  set missProgress(double value) => _missProgress = value;
 
   bool get isCut =>
       status == SaberTargetStatus.cutPerfect ||
