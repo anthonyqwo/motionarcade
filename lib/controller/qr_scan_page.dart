@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../network/room_connection_uri.dart';
+
 class QrScanPage extends StatefulWidget {
   const QrScanPage({super.key});
 
@@ -25,9 +27,10 @@ class _QrScanPageState extends State<QrScanPage> {
 
     for (final barcode in capture.barcodes) {
       final value = barcode.rawValue;
-      if (value != null && value.startsWith('ws://')) {
+      final uri = value == null ? null : RoomConnectionUri.normalize(value);
+      if (uri != null) {
         _hasResult = true;
-        Navigator.of(context).pop(value);
+        Navigator.of(context).pop(uri.toString());
         return;
       }
     }

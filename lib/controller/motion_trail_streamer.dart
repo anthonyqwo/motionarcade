@@ -37,9 +37,9 @@ class MotionTrailStreamer {
   final int activeIntervalMs;
   final int idleIntervalMs;
   final CalibrationService? calibrationService;
-  double? _rotationActiveThreshold;
-  double? _tipDeltaActiveThreshold;
-  int? _maxBatchSize;
+  final double? _rotationActiveThreshold;
+  final double? _tipDeltaActiveThreshold;
+  final int? _maxBatchSize;
 
   final List<MotionTrailSample> _batch = [];
   DateTime? _referenceTimestamp;
@@ -114,7 +114,7 @@ class MotionTrailStreamer {
         .inMilliseconds;
 
     final isActive =
-        sample.motionMagnitude >= idleThreshold ||
+        strength >= idleThreshold ||
         sample.rotationRate.magnitude >=
             (_rotationActiveThreshold ?? _defaultRotationActiveThreshold) ||
         _hasTipMotion(

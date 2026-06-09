@@ -88,7 +88,7 @@ FusedMotionSample 60Hz 左右進來
 
 Active 判斷不可只看 acceleration，必須至少包含：
 
-- `sample.motionMagnitude >= idleThreshold`：一般揮動。
+- `sample.userAcceleration.magnitude >= idleThreshold`：一般揮動。不要用加速度/旋轉混合後的 `motionMagnitude` 當 acceleration threshold，否則中等揮動可能被稀釋成 idle。
 - `sample.rotationRate.magnitude >= rotationActiveThreshold`：小幅旋轉但 acceleration 很低。
 - 前後 `tipX/tipY` 的投影變化超過門檻：姿態位置確實在移動。
 
@@ -134,7 +134,7 @@ Active 判斷不可只看 acceleration，必須至少包含：
 - [x] trail stream 預設保留每筆 fused sample 進 streamer；只有在明確效能壓力下才調高 downsampling。
 - [x] 建立 `MotionTrailEvent` 協定，包含 `referenceTimestamp`（絕對時間）供電腦端對齊 slash event。
 - [x] 建立 `MotionTrailStreamer`（Saber 用途）：遊戲進行中持續送 trail packets。
-- [x] 實作 adaptive rate：active 判斷同時使用 `motionMagnitude`、`rotationRate` 與 tip 投影變化；active 約 30Hz，idle 約 10Hz。
+- [x] 實作 adaptive rate：active 判斷同時使用 `userAcceleration.magnitude`、`rotationRate` 與 tip 投影變化；active 約 30Hz，idle 約 10Hz。
 - [x] 建立 `getWindowSnapshot(durationMs)` 方法（Basketball 用途）：touch up 時一次性取出指定時間範圍的 samples。
 - [x] 電腦端接收 trail packets 並保留最近軌跡。
 - [ ] 從 window snapshot 產生 features：peak、duration、dominantAxis、stability、releasePoint。

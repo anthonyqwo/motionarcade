@@ -477,64 +477,69 @@ class _GameOverOverlay extends StatelessWidget {
       child: Container(
         color: Colors.black.withValues(alpha: 0.54),
         child: Center(
-          child: Container(
-            width: 360,
-            constraints: const BoxConstraints(maxWidth: 420),
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111827).withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.redAccent.withValues(alpha: 0.4),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.redAccent.withValues(alpha: 0.16),
-                  blurRadius: 24,
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'GAME OVER',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: Colors.redAccent,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.6,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111827).withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.redAccent.withValues(alpha: 0.4),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _ResultMetric(label: 'SCORE', value: score.toString()),
-                    const SizedBox(width: 18),
-                    _ResultMetric(
-                      label: 'TIME',
-                      value: _formatDuration(survivedSeconds),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.redAccent.withValues(alpha: 0.16),
+                      blurRadius: 24,
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    FilledButton.icon(
-                      onPressed: onRetry,
-                      icon: const Icon(Icons.replay),
-                      label: const Text('Retry'),
+                    Text(
+                      'GAME OVER',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: Colors.redAccent,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.6,
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: onBack,
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('Room'),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _ResultMetric(label: 'SCORE', value: score.toString()),
+                        const SizedBox(width: 18),
+                        _ResultMetric(
+                          label: 'TIME',
+                          value: _formatDuration(survivedSeconds),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: onRetry,
+                          icon: const Icon(Icons.replay),
+                          label: const Text('Retry'),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: onBack,
+                          icon: const Icon(Icons.arrow_back),
+                          label: const Text('Room'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

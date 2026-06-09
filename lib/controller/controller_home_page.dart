@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../network/connection_status.dart';
+import '../network/room_connection_uri.dart';
 import '../network/udp_motion_client_service.dart';
 import '../network/websocket_client_service.dart';
 import '../shared/models/fused_motion_sample.dart';
@@ -67,9 +68,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     },
     calibrationService: _calibrationService,
   );
-  final TextEditingController _serverController = TextEditingController(
-    text: 'ws://192.168.1.20:8080',
-  );
+  final TextEditingController _serverController = TextEditingController();
   final String _playerId = 'p-${DateTime.now().millisecondsSinceEpoch}';
 
   StreamSubscription<ConnectionStatus>? _statusSubscription;
@@ -176,15 +175,20 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   }
 
   Future<void> _connect() async {
-    final uri = Uri.tryParse(_serverController.text.trim());
-    if (uri == null || uri.scheme != 'ws') {
-      setState(() => _errorMessage = 'Enter a valid ws:// URI.');
+    FocusScope.of(context).unfocus();
+    final uri = RoomConnectionUri.normalize(_serverController.text);
+    if (uri == null) {
+      setState(() {
+        _errorMessage =
+            'Enter a room address like 192.168.1.20:8080 or ws://192.168.1.20:8080.';
+      });
       return;
     }
 
     setState(() {
       _errorMessage = null;
       _status = ConnectionStatus.connecting;
+      _serverController.text = uri.toString();
     });
 
     try {
@@ -244,7 +248,8 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     }
 
     setState(() {
-      _serverController.text = result;
+      _serverController.text =
+          RoomConnectionUri.normalize(result)?.toString() ?? result;
       _errorMessage = null;
     });
   }
@@ -421,9 +426,17 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                       labelText: 'Server URI',
+                      hintText: '192.168.1.20:8080',
                       prefixIcon: Icon(Icons.link),
                     ),
                     keyboardType: TextInputType.url,
+                    textInputAction: TextInputAction.go,
+                    onSubmitted: (_) {
+                      if (_status != ConnectionStatus.connecting &&
+                          _status != ConnectionStatus.connected) {
+                        unawaited(_connect());
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
