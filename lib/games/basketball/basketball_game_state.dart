@@ -66,7 +66,6 @@ class BasketballGameState extends ChangeNotifier {
   double _countdownRemaining;
   double _elapsedSeconds = 0;
   double _playingSeconds = 0;
-  double _resolutionHoldSeconds = 0;
   Size _arenaSize = const Size(800, 450);
   String? _activePlayerId;
 
@@ -141,7 +140,6 @@ class BasketballGameState extends ChangeNotifier {
     _activePlayerId = null;
     _elapsedSeconds = 0;
     _playingSeconds = 0;
-    _resolutionHoldSeconds = 0;
     _countdownRemaining = countdownSeconds;
     _phase = countdownSeconds > 0
         ? BasketballRunPhase.countdown
@@ -175,22 +173,23 @@ class BasketballGameState extends ChangeNotifier {
     }
 
     final ball = currentBall;
-    if (ball != null && !ball.resolved && isPlaying) {
-      final result = _physics.step(ball, currentHoop, _arenaSize, safeDt);
-      if (result.scored) {
-        _registerScore();
+    if (ball != null && isPlaying) {
+      if (ball.resolved) {
+        _advanceResolvedBall(ball, safeDt);
+        if (_isBallBelowScreen(ball)) {
+          currentBall = null;
+          lastEventLabel = 'Ready shot';
+        }
         needsNotify = true;
-      } else if (result.missed) {
-        _registerMiss(result.missType ?? BasketballMissType.long);
-        needsNotify = true;
-      }
-    }
-
-    if (currentBall?.resolved == true) {
-      _resolutionHoldSeconds -= safeDt;
-      if (_resolutionHoldSeconds <= 0) {
-        currentBall = null;
-        needsNotify = true;
+      } else {
+        final result = _physics.step(ball, currentHoop, _arenaSize, safeDt);
+        if (result.scored) {
+          _registerScore();
+          needsNotify = true;
+        } else if (result.missed) {
+          _registerMiss(result.missType ?? BasketballMissType.long);
+          needsNotify = true;
+        }
       }
     }
 
@@ -206,7 +205,7 @@ class BasketballGameState extends ChangeNotifier {
     _ensurePlayer(event.playerId);
 
     final existingBall = currentBall;
-    if (existingBall != null && !existingBall.resolved) {
+    if (existingBall != null) {
       server.sendToPlayer(
         event.playerId,
         FeedbackEvent(
@@ -215,7 +214,7 @@ class BasketballGameState extends ChangeNotifier {
           result: FeedbackResult.weak,
           haptic: HapticPattern.light,
           durationMs: 60,
-          message: 'Wait for the ball',
+          message: 'Wait for the ball to drop',
         ),
       );
       return;
@@ -226,7 +225,6 @@ class BasketballGameState extends ChangeNotifier {
     lastOutcome = BasketballShotOutcome.inFlight;
     lastMissType = null;
     lastEventLabel = 'Shot released';
-    _resolutionHoldSeconds = 0;
     currentBall = _physics.launchBall(
       arena: _arenaSize,
       power: event.power,
@@ -307,7 +305,6 @@ class BasketballGameState extends ChangeNotifier {
     lastOutcome = BasketballShotOutcome.scored;
     lastMissType = null;
     lastEventLabel = streak >= 10 ? 'Nice streak: $streak' : 'Bucket';
-    _resolutionHoldSeconds = 0.55;
 
     final feedback = (lastShot?.stability ?? 0) >= 0.82
         ? FeedbackResult.perfect
@@ -338,7 +335,6 @@ class BasketballGameState extends ChangeNotifier {
     lastOutcome = BasketballShotOutcome.missed;
     lastMissType = missType;
     lastEventLabel = _missLabel(missType);
-    _resolutionHoldSeconds = 0.45;
 
     server.sendToPlayer(
       playerId,
@@ -374,6 +370,18 @@ class BasketballGameState extends ChangeNotifier {
     _bestStreakByPlayer.putIfAbsent(playerId, () => 0);
     _hitsByPlayer.putIfAbsent(playerId, () => 0);
     _missesByPlayer.putIfAbsent(playerId, () => 0);
+  }
+
+  void _advanceResolvedBall(BasketballBall ball, double dt) {
+    ball.previousPosition = ball.position;
+    ball.velocity = ball.velocity.translate(0, _physics.gravityY * dt);
+    ball.position = ball.position + ball.velocity * dt;
+    ball.ageSeconds += dt;
+    ball.recordTrail();
+  }
+
+  bool _isBallBelowScreen(BasketballBall ball) {
+    return ball.position.dy > _arenaSize.height + ball.radius * 2.2;
   }
 
   String _missLabel(BasketballMissType missType) {
