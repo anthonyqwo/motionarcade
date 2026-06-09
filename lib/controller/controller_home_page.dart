@@ -54,10 +54,13 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     playerId: _playerId,
     onEvent: (event) {
       if (_status == ConnectionStatus.connected) {
+        final sampleCount = event.samples.length;
         if (_udpClient.sendTrail(event)) {
           _udpTrailPacketsSent++;
+          _trailSamplesSent += sampleCount;
         } else {
           _webSocketTrailPacketsSent++;
+          _trailSamplesSent += sampleCount;
           _send(event, updateLastEvent: false);
         }
       }
@@ -73,6 +76,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   StreamSubscription<MotionSensorSnapshot>? _sensorSubscription;
   StreamSubscription<FusedMotionSnapshot>? _fusedMotionSubscription;
   StreamSubscription<MotionEvent>? _clientEventSubscription;
+  Timer? _trailRateTimer;
   FeedbackEvent? _lastFeedback;
   bool _showFeedbackOverlay = false;
   Timer? _feedbackOverlayTimer;
@@ -87,6 +91,13 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   String? _errorMessage;
   int _udpTrailPacketsSent = 0;
   int _webSocketTrailPacketsSent = 0;
+  int _trailSamplesSent = 0;
+  int _lastUdpTrailPacketsSent = 0;
+  int _lastWebSocketTrailPacketsSent = 0;
+  int _lastTrailSamplesSent = 0;
+  int _udpTrailPacketsPerSecond = 0;
+  int _webSocketTrailPacketsPerSecond = 0;
+  int _trailSamplesPerSecond = 0;
 
   MotionDetector _buildMotionDetector() {
     return MotionDetector(
@@ -131,6 +142,21 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
         _handleFusedMotionSnapshot(snapshot);
       }
     });
+    _trailRateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _udpTrailPacketsPerSecond =
+            _udpTrailPacketsSent - _lastUdpTrailPacketsSent;
+        _webSocketTrailPacketsPerSecond =
+            _webSocketTrailPacketsSent - _lastWebSocketTrailPacketsSent;
+        _trailSamplesPerSecond = _trailSamplesSent - _lastTrailSamplesSent;
+        _lastUdpTrailPacketsSent = _udpTrailPacketsSent;
+        _lastWebSocketTrailPacketsSent = _webSocketTrailPacketsSent;
+        _lastTrailSamplesSent = _trailSamplesSent;
+      });
+    });
   }
 
   @override
@@ -139,6 +165,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     unawaited(_sensorSubscription?.cancel());
     unawaited(_fusedMotionSubscription?.cancel());
     unawaited(_clientEventSubscription?.cancel());
+    _trailRateTimer?.cancel();
     _feedbackOverlayTimer?.cancel();
     unawaited(_udpClient.disconnect());
     unawaited(_client.disconnect());
@@ -450,8 +477,10 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                     trailTransport: _udpClient.isConnected
                         ? 'UDP'
                         : 'WebSocket',
-                    udpTrailPacketsSent: _udpTrailPacketsSent,
-                    webSocketTrailPacketsSent: _webSocketTrailPacketsSent,
+                    udpTrailPacketsPerSecond: _udpTrailPacketsPerSecond,
+                    webSocketTrailPacketsPerSecond:
+                        _webSocketTrailPacketsPerSecond,
+                    trailSamplesPerSecond: _trailSamplesPerSecond,
                   ),
                   const SizedBox(height: 24),
                   FusedMotionDebugPanel(snapshot: _fusedMotionSnapshot),
@@ -675,8 +704,9 @@ class _ControllerStatusGrid extends StatelessWidget {
     required this.lastMotion,
     required this.isMotionActive,
     required this.trailTransport,
-    required this.udpTrailPacketsSent,
-    required this.webSocketTrailPacketsSent,
+    required this.udpTrailPacketsPerSecond,
+    required this.webSocketTrailPacketsPerSecond,
+    required this.trailSamplesPerSecond,
   });
 
   final ConnectionStatus status;
@@ -684,8 +714,9 @@ class _ControllerStatusGrid extends StatelessWidget {
   final MotionDetectionResult? lastMotion;
   final bool isMotionActive;
   final String trailTransport;
-  final int udpTrailPacketsSent;
-  final int webSocketTrailPacketsSent;
+  final int udpTrailPacketsPerSecond;
+  final int webSocketTrailPacketsPerSecond;
+  final int trailSamplesPerSecond;
 
   @override
   Widget build(BuildContext context) {
@@ -735,7 +766,7 @@ class _ControllerStatusGrid extends StatelessWidget {
             icon: Icons.timeline,
             label: 'Trail',
             value:
-                '$trailTransport U:$udpTrailPacketsSent W:$webSocketTrailPacketsSent',
+                '$trailTransport ${udpTrailPacketsPerSecond + webSocketTrailPacketsPerSecond}p/s ${trailSamplesPerSecond}s/s',
             trailing: trailTransport == 'UDP'
                 ? const PulsingDot(color: Colors.green, size: 8)
                 : null,

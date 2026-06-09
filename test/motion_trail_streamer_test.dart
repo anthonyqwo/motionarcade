@@ -10,18 +10,66 @@ void main() {
     required DateTime time,
     QuaternionSample attitude = QuaternionSample.identity,
     double userAccY = 0.0,
+    double rotationY = 0.0,
   }) {
     return FusedMotionSample(
       attitude: attitude,
       gravity: const Vector3Sample(x: 0, y: -9.8, z: 0),
       userAcceleration: Vector3Sample(x: 0, y: userAccY, z: 0),
-      rotationRate: const Vector3Sample(x: 0, y: 0, z: 0),
+      rotationRate: Vector3Sample(x: 0, y: rotationY, z: 0),
       timestamp: time,
       source: 'test',
     );
   }
 
   group('MotionTrailStreamer', () {
+    test('defaults to active trail packets near 30Hz', () {
+      final events = <MotionTrailEvent>[];
+      final streamer = MotionTrailStreamer(
+        playerId: 'p1',
+        onEvent: events.add,
+        alpha: 1.0,
+      );
+
+      final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
+      for (var i = 0; i < 10; i++) {
+        streamer.onSample(
+          createSample(
+            time: t0.add(Duration(milliseconds: i * 16)),
+            userAccY: 3.0,
+          ),
+        );
+      }
+
+      expect(events, hasLength(4));
+      expect(events.first.timestamp, t0.add(const Duration(milliseconds: 32)));
+    });
+
+    test('treats low-acceleration rotation as active trail movement', () {
+      final events = <MotionTrailEvent>[];
+      final streamer = MotionTrailStreamer(
+        playerId: 'p1',
+        onEvent: events.add,
+        downsampleRatio: 1,
+        alpha: 1.0,
+        idleThreshold: 2.0,
+        rotationActiveThreshold: 0.2,
+        activeIntervalMs: 33,
+        idleIntervalMs: 200,
+      );
+
+      final t0 = DateTime.fromMillisecondsSinceEpoch(1000);
+      streamer.onSample(createSample(time: t0, rotationY: 0.3));
+      streamer.onSample(
+        createSample(
+          time: t0.add(const Duration(milliseconds: 40)),
+          rotationY: 0.3,
+        ),
+      );
+
+      expect(events, hasLength(1));
+    });
+
     test('projects relative attitude correctly onto tipX and tipY', () {
       MotionTrailEvent? receivedEvent;
       final streamer = MotionTrailStreamer(

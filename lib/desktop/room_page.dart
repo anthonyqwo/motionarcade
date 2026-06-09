@@ -48,10 +48,22 @@ class _RoomPageState extends State<RoomPage> {
   String? _errorMessage;
   int _udpTrailPacketsReceived = 0;
   int _webSocketTrailPacketsReceived = 0;
+  int _trailSamplesReceived = 0;
+  int _lastUdpTrailPacketsReceived = 0;
+  int _lastWebSocketTrailPacketsReceived = 0;
+  int _lastTrailSamplesReceived = 0;
+  int _udpTrailPacketsPerSecond = 0;
+  int _webSocketTrailPacketsPerSecond = 0;
+  int _trailSamplesPerSecond = 0;
+  DateTime? _lastUdpTrailPacketAt;
+  DateTime? _lastWebSocketTrailPacketAt;
+  double? _udpAverageArrivalGapMs;
+  double? _webSocketAverageArrivalGapMs;
 
   MotionDirection _targetDirection = MotionDirection.up;
   Timer? _targetDirectionTimer;
   Timer? _trailPruneTimer;
+  Timer? _trailStatsTimer;
 
   @override
   void initState() {
@@ -84,12 +96,29 @@ class _RoomPageState extends State<RoomPage> {
     _trailPruneTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       _trailBuffer.prune(DateTime.now());
     });
+    _trailStatsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _udpTrailPacketsPerSecond =
+            _udpTrailPacketsReceived - _lastUdpTrailPacketsReceived;
+        _webSocketTrailPacketsPerSecond =
+            _webSocketTrailPacketsReceived - _lastWebSocketTrailPacketsReceived;
+        _trailSamplesPerSecond =
+            _trailSamplesReceived - _lastTrailSamplesReceived;
+        _lastUdpTrailPacketsReceived = _udpTrailPacketsReceived;
+        _lastWebSocketTrailPacketsReceived = _webSocketTrailPacketsReceived;
+        _lastTrailSamplesReceived = _trailSamplesReceived;
+      });
+    });
   }
 
   @override
   void dispose() {
     _targetDirectionTimer?.cancel();
     _trailPruneTimer?.cancel();
+    _trailStatsTimer?.cancel();
     unawaited(_eventSubscription?.cancel());
     unawaited(_udpEventSubscription?.cancel());
     unawaited(_statusSubscription?.cancel());
@@ -148,11 +177,41 @@ class _RoomPageState extends State<RoomPage> {
     if (event is! MotionTrailEvent) {
       return;
     }
+    final now = DateTime.now();
+    _trailSamplesReceived += event.samples.length;
     if (isUdp) {
       _udpTrailPacketsReceived++;
+      _udpAverageArrivalGapMs = _recordArrivalGap(
+        previous: _lastUdpTrailPacketAt,
+        current: now,
+        averageMs: _udpAverageArrivalGapMs,
+      );
+      _lastUdpTrailPacketAt = now;
     } else {
       _webSocketTrailPacketsReceived++;
+      _webSocketAverageArrivalGapMs = _recordArrivalGap(
+        previous: _lastWebSocketTrailPacketAt,
+        current: now,
+        averageMs: _webSocketAverageArrivalGapMs,
+      );
+      _lastWebSocketTrailPacketAt = now;
     }
+  }
+
+  double? _recordArrivalGap({
+    required DateTime? previous,
+    required DateTime current,
+    required double? averageMs,
+  }) {
+    if (previous == null) {
+      return averageMs;
+    }
+
+    final gapMs = current.difference(previous).inMilliseconds.toDouble();
+    if (averageMs == null) {
+      return gapMs;
+    }
+    return averageMs * 0.8 + gapMs * 0.2;
   }
 
   void _handleJoin(JoinEvent event) {
@@ -271,6 +330,11 @@ class _RoomPageState extends State<RoomPage> {
   }
 
   List<TrailRenderPoint> get _trailPoints => _trailBuffer.points;
+  int get _trailPacketsPerSecond =>
+      _udpTrailPacketsPerSecond + _webSocketTrailPacketsPerSecond;
+  double? get _activeTrailAverageGapMs => _udpTrailPacketsReceived > 0
+      ? _udpAverageArrivalGapMs
+      : _webSocketAverageArrivalGapMs;
 
   @override
   Widget build(BuildContext context) {
@@ -304,11 +368,19 @@ class _RoomPageState extends State<RoomPage> {
               players: _players,
               trailPoints: _trailPoints,
               trailTransportLabel: _udpTrailPacketsReceived > 0
-                  ? 'UDP $_udpTrailPacketsReceived'
-                  : 'WS $_webSocketTrailPacketsReceived',
+                  ? 'UDP ${_udpTrailPacketsPerSecond}p/s'
+                  : 'WS ${_webSocketTrailPacketsPerSecond}p/s',
               lastSlash: _lastSlash,
               lastEventLabel: _eventLog.isEmpty ? 'none' : _eventLog.first,
               targetDirection: _targetDirection,
+            ),
+            const SizedBox(height: 16),
+            _TrailDiagnosticsCard(
+              transport: _udpTrailPacketsReceived > 0 ? 'UDP' : 'WebSocket',
+              packetsPerSecond: _trailPacketsPerSecond,
+              samplesPerSecond: _trailSamplesPerSecond,
+              averageGapMs: _activeTrailAverageGapMs,
+              trailPoints: _trailPoints.length,
             ),
             const SizedBox(height: 16),
             Card(
@@ -489,6 +561,105 @@ class _RoomPageState extends State<RoomPage> {
                             ),
                         ],
                       ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TrailDiagnosticsCard extends StatelessWidget {
+  const _TrailDiagnosticsCard({
+    required this.transport,
+    required this.packetsPerSecond,
+    required this.samplesPerSecond,
+    required this.averageGapMs,
+    required this.trailPoints,
+  });
+
+  final String transport;
+  final int packetsPerSecond;
+  final int samplesPerSecond;
+  final double? averageGapMs;
+  final int trailPoints;
+
+  @override
+  Widget build(BuildContext context) {
+    final gap = averageGapMs;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.query_stats,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Trail diagnostics',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _TrailMetric(label: 'Transport', value: transport),
+                _TrailMetric(label: 'Packets/s', value: '$packetsPerSecond'),
+                _TrailMetric(label: 'Samples/s', value: '$samplesPerSecond'),
+                _TrailMetric(
+                  label: 'Avg gap',
+                  value: gap == null ? '-' : '${gap.round()}ms',
+                ),
+                _TrailMetric(label: 'Points', value: '$trailPoints'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TrailMetric extends StatelessWidget {
+  const _TrailMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Text(
+              value,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],

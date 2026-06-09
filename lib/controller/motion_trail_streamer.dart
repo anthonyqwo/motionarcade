@@ -7,21 +7,31 @@ class MotionTrailStreamer {
   MotionTrailStreamer({
     required this.playerId,
     required this.onEvent,
-    this.downsampleRatio = 2,
+    this.downsampleRatio = 1,
     this.alpha = 0.3,
     this.idleThreshold = 1.5,
-    this.activeIntervalMs = 33,
-    this.idleIntervalMs = 200,
+    this.rotationActiveThreshold = 0.2,
+    this.tipDeltaActiveThreshold = 0.012,
+    this.activeIntervalMs = 30,
+    this.idleIntervalMs = 100,
+    this.maxBatchSize = 12,
     this.calibrationService,
-  });
+  }) : assert(downsampleRatio >= 1),
+       assert(alpha > 0 && alpha <= 1),
+       assert(activeIntervalMs > 0),
+       assert(idleIntervalMs >= activeIntervalMs),
+       assert(maxBatchSize >= 1);
 
   final String playerId;
   final void Function(MotionTrailEvent event) onEvent;
   final int downsampleRatio;
   final double alpha;
   final double idleThreshold;
+  final double rotationActiveThreshold;
+  final double tipDeltaActiveThreshold;
   final int activeIntervalMs;
   final int idleIntervalMs;
+  final int maxBatchSize;
   final CalibrationService? calibrationService;
 
   final List<MotionTrailSample> _batch = [];
@@ -31,6 +41,8 @@ class MotionTrailStreamer {
 
   double? _smoothedTipX;
   double? _smoothedTipY;
+  double? _lastSentTipX;
+  double? _lastSentTipY;
 
   /// Processes a new fused motion sample, downsampling and projecting it,
   /// and firing the onEvent callback when a packet interval has elapsed.
@@ -85,10 +97,14 @@ class MotionTrailStreamer {
     _lastSentTime ??= sample.timestamp;
     final elapsedMs = sample.timestamp.difference(_lastSentTime!).inMilliseconds;
 
-    final isActive = sample.userAcceleration.magnitude >= idleThreshold;
+    final isActive =
+        sample.motionMagnitude >= idleThreshold ||
+        sample.rotationRate.magnitude >= rotationActiveThreshold ||
+        _hasMovedSinceLastSend(_smoothedTipX!, _smoothedTipY!);
     final targetIntervalMs = isActive ? activeIntervalMs : idleIntervalMs;
 
-    if (elapsedMs >= targetIntervalMs && _batch.isNotEmpty) {
+    if ((elapsedMs >= targetIntervalMs || _batch.length >= maxBatchSize) &&
+        _batch.isNotEmpty) {
       final event = MotionTrailEvent(
         playerId: playerId,
         timestamp: sample.timestamp,
@@ -100,7 +116,22 @@ class MotionTrailStreamer {
       _batch.clear();
       _referenceTimestamp = null;
       _lastSentTime = sample.timestamp;
+      _lastSentTipX = _smoothedTipX;
+      _lastSentTipY = _smoothedTipY;
     }
+  }
+
+  bool _hasMovedSinceLastSend(double tipX, double tipY) {
+    final lastX = _lastSentTipX;
+    final lastY = _lastSentTipY;
+    if (lastX == null || lastY == null) {
+      return false;
+    }
+
+    final dx = tipX - lastX;
+    final dy = tipY - lastY;
+    return dx * dx + dy * dy >=
+        tipDeltaActiveThreshold * tipDeltaActiveThreshold;
   }
 
   /// Resets the streamer state.
@@ -111,5 +142,7 @@ class MotionTrailStreamer {
     _sampleCounter = 0;
     _smoothedTipX = null;
     _smoothedTipY = null;
+    _lastSentTipX = null;
+    _lastSentTipY = null;
   }
 }
