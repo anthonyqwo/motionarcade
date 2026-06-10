@@ -50,5 +50,22 @@ void main() {
       expect(rim.dy, lessThan(floor.dy));
       expect(rim.dx, floor.dx);
     });
+
+    test('shared ball base radius projects to 80 percent of rim width', () {
+      final hoopWidth =
+          BasketballCourt.rimHalfWidth *
+          projector.courtHalfWidthAtDepth(BasketballCourt.hoopZ) *
+          2;
+      final projected = projector.projectBall(
+        const BasketballCourtPoint(
+          x: 0,
+          y: BasketballCourt.rimHeight,
+          z: BasketballCourt.hoopZ,
+        ),
+        baseRadius: projector.ballBaseRadiusForHoopRatio(),
+      );
+
+      expect(projected.radius * 2, closeTo(hoopWidth * 0.8, 0.5));
+    });
   });
 }

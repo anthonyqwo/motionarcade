@@ -23,6 +23,8 @@ class ProjectedBasketball {
 class BasketballProjector {
   const BasketballProjector(this.size);
 
+  static const double defaultBallToRimDiameterRatio = 0.8;
+
   final Size size;
 
   Offset projectPoint(BasketballCourtPoint point) {
@@ -58,6 +60,16 @@ class BasketballProjector {
 
   double ballScaleForDepth(double z) {
     return _lerp(1.18, 0.88, depthT(z));
+  }
+
+  double ballBaseRadiusForHoopRatio([
+    double ratio = defaultBallToRimDiameterRatio,
+  ]) {
+    final hoopWidth =
+        BasketballCourt.rimHalfWidth *
+        courtHalfWidthAtDepth(BasketballCourt.hoopZ) *
+        2;
+    return (hoopWidth * ratio / 2) / ballScaleForDepth(BasketballCourt.hoopZ);
   }
 
   double hoopScale() {

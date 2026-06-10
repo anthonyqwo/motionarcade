@@ -189,7 +189,7 @@ class BasketballPainter extends CustomPainter {
               y: BasketballCourt.releaseHeight,
               z: BasketballCourt.releaseZ,
             ),
-            baseRadius: 24 * BasketballProjector.scaleForArena(size),
+            baseRadius: projector.ballBaseRadiusForHoopRatio(),
           )
         : projector.projectBall(ball.courtPosition, baseRadius: ball.radius);
 

@@ -229,12 +229,7 @@ class BasketballPhysics {
     );
     final steadiness = stability.clamp(0.0, 1.0).toDouble();
     final projector = BasketballProjector(arena);
-    final hoopWidth =
-        BasketballCourt.rimHalfWidth *
-        projector.courtHalfWidthAtDepth(BasketballCourt.hoopZ) *
-        2;
-    final ballRadius =
-        (hoopWidth * 0.4) / projector.ballScaleForDepth(BasketballCourt.hoopZ);
+    final ballRadius = projector.ballBaseRadiusForHoopRatio();
     final travelTime = _lerp(1.08, 0.76, mappedPower);
     final aimX =
         offset.clamp(-1.0, 1.0).toDouble() * _lerp(0.28, 0.36, steadiness);
