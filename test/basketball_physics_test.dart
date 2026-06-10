@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:motionarcade/games/basketball/basketball_court_space.dart';
 import 'package:motionarcade/games/basketball/basketball_physics.dart';
+import 'package:motionarcade/games/basketball/basketball_projection.dart';
 
 void main() {
   group('BasketballPhysics', () {
@@ -134,6 +135,28 @@ void main() {
       }
 
       expect(result.scored, isTrue);
+    });
+
+    test('launched ball is about 80 percent of the rim width near hoop', () {
+      final hoop = hoopFor();
+      final ball = physics.launchBall(
+        arena: arena,
+        power: 0.65,
+        angle: 45,
+        offset: 0,
+        stability: 1,
+      );
+      const projector = BasketballProjector(arena);
+      final projected = projector.projectBall(
+        const BasketballCourtPoint(
+          x: 0,
+          y: BasketballCourt.rimHeight,
+          z: BasketballCourt.hoopZ,
+        ),
+        baseRadius: ball.radius,
+      );
+
+      expect(projected.radius * 2, closeTo(hoop.rimWidth * 0.8, 0.5));
     });
 
     test('wide offset changes the hoop-plane target enough to miss', () {

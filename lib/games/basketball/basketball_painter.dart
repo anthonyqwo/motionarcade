@@ -20,7 +20,6 @@ class BasketballPainter extends CustomPainter {
 
     _drawBackground(canvas, size, projector);
     _drawHoopBack(canvas, hoop);
-    _drawBallShadow(canvas, ball, projector);
 
     if (ballBehindFrontRim) {
       _drawTrail(canvas, ball, projector);
@@ -153,31 +152,6 @@ class BasketballPainter extends CustomPainter {
         height: 5 * scale,
       ),
       standPaint,
-    );
-  }
-
-  void _drawBallShadow(
-    Canvas canvas,
-    BasketballBall? ball,
-    BasketballProjector projector,
-  ) {
-    if (ball == null) {
-      return;
-    }
-    final projected = projector.projectBall(
-      ball.courtPosition,
-      baseRadius: ball.radius,
-    );
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: projected.shadowOpacity)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: projected.shadowCenter,
-        width: projected.radius * 2.2 * projected.shadowScale,
-        height: projected.radius * 0.48 * projected.shadowScale,
-      ),
-      shadowPaint,
     );
   }
 
