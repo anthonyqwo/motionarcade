@@ -91,8 +91,8 @@ void main() {
 
       expect(left.isValid, isTrue);
       expect(right.isValid, isTrue);
-      expect(left.event!.offset, lessThan(0));
-      expect(right.event!.offset, greaterThan(0));
+      expect(left.event!.offset, lessThan(-0.35));
+      expect(right.event!.offset, greaterThan(0.35));
     });
   });
 }

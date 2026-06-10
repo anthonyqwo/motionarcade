@@ -109,7 +109,7 @@ class BasketballPainter extends CustomPainter {
   }
 
   void _drawBall(Canvas canvas, BasketballBall? ball, Size size) {
-    final depthScale = _ballDepthScale(ball, size);
+    final depthScale = _ballDepthScale(ball);
     final radius = (ball?.radius ?? 16.0) * depthScale;
     final center = ball?.position ?? Offset(size.width / 2, size.height - 72);
 
@@ -141,12 +141,9 @@ class BasketballPainter extends CustomPainter {
     );
   }
 
-  double _ballDepthScale(BasketballBall? ball, Size size) {
-    final y = ball?.position.dy ?? size.height - 72;
-    final farY = size.height * 0.22;
-    final nearY = size.height * 0.92;
-    final t = ((y - farY) / (nearY - farY)).clamp(0.0, 1.0).toDouble();
-    return 1.05 + t * 1.35;
+  double _ballDepthScale(BasketballBall? ball) {
+    final t = ((ball?.ageSeconds ?? 0) / 0.9).clamp(0.0, 1.0).toDouble();
+    return 2.08 - t * 0.34;
   }
 
   @override

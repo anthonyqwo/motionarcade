@@ -217,7 +217,7 @@ class BasketballPhysics {
     return BasketballBall(
       position: start,
       velocity: Offset(
-        lateral * 260 * scaleX,
+        lateral * 340 * scaleX,
         -_lerp(720, 1040, mappedPower) * arc * scaleY,
       ),
       radius: 16 * math.min(scaleX, scaleY).clamp(0.75, 1.35),

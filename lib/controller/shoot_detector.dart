@@ -70,9 +70,10 @@ class ShootDetector {
       features.releasePeakZ.abs() + 0.18,
     );
     final angle = (angleRadians * 180 / math.pi).clamp(32.0, 62.0).toDouble();
-    final offset = (features.lateralDrift / (features.totalEnergy + 0.0001))
-        .clamp(-1.0, 1.0)
-        .toDouble();
+    final offset =
+        (features.lateralDrift / (features.upwardEnergy + 0.0001) * 2.2)
+            .clamp(-1.0, 1.0)
+            .toDouble();
 
     return ShootDetectionResult.valid(
       event: ShootEvent(
