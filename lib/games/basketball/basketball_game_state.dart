@@ -8,6 +8,7 @@ import '../../network/websocket_server_service.dart';
 import '../../shared/models/motion_event.dart';
 import '../../shared/models/player.dart';
 import 'basketball_physics.dart';
+import 'basketball_projection.dart';
 
 enum BasketballRunPhase { countdown, playing }
 
@@ -373,15 +374,14 @@ class BasketballGameState extends ChangeNotifier {
   }
 
   void _advanceResolvedBall(BasketballBall ball, double dt) {
-    ball.previousPosition = ball.position;
-    ball.velocity = ball.velocity.translate(0, _physics.gravityY * dt);
-    ball.position = ball.position + ball.velocity * dt;
-    ball.ageSeconds += dt;
-    ball.recordTrail();
+    _physics.advanceResolvedBall(ball, dt);
   }
 
   bool _isBallBelowScreen(BasketballBall ball) {
-    return ball.position.dy > _arenaSize.height + ball.radius * 2.2;
+    final projected = BasketballProjector(
+      _arenaSize,
+    ).projectBall(ball.courtPosition, baseRadius: ball.radius);
+    return projected.center.dy > _arenaSize.height + projected.radius * 2.2;
   }
 
   String _missLabel(BasketballMissType missType) {

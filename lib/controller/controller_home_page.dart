@@ -91,6 +91,8 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
   RoomStateEvent? _roomState;
   SensitivityLevel _sensitivityLevel = SensitivityLevel.medium;
   bool _isCalibrated = false;
+  String? _calibrationMessage;
+  int _calibrationCount = 0;
   String _lastEvent = 'None';
   String _lastShotStatus = 'Ready';
   String? _errorMessage;
@@ -279,10 +281,15 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
         ? _calibrationService.calibrate(_sensorSnapshot)
         : _calibrationService.calibrateFusedMotion(fusedSample);
     if (neutral == null) {
-      setState(() => _errorMessage = 'Start motion before calibrating.');
+      const message = 'Start motion before calibrating.';
+      setState(() {
+        _errorMessage = message;
+        _calibrationMessage = message;
+      });
       return;
     }
 
+    final wasCalibrated = _isCalibrated;
     _send(
       CalibrateEvent(
         playerId: _playerId,
@@ -292,8 +299,19 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
     );
     setState(() {
       _isCalibrated = true;
+      _calibrationCount++;
+      _calibrationMessage = wasCalibrated
+          ? 'Calibration updated ($_calibrationCount)'
+          : 'Calibration saved';
       _errorMessage = null;
     });
+    unawaited(HapticFeedback.mediumImpact());
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(wasCalibrated ? 'Calibration updated.' : 'Calibrated.'),
+        duration: const Duration(milliseconds: 900),
+      ),
+    );
   }
 
   void _handleFusedMotionSnapshot(FusedMotionSnapshot snapshot) {
@@ -668,6 +686,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                   _MotionReadinessCard(
                     isMotionActive: _isMotionActive,
                     isCalibrated: _isCalibrated,
+                    calibrationMessage: _calibrationMessage,
                     level: _sensitivityLevel,
                     settings: SensitivitySettings.forLevel(_sensitivityLevel),
                     onChanged: _setSensitivity,
@@ -1140,6 +1159,7 @@ class _MotionReadinessCard extends StatelessWidget {
   const _MotionReadinessCard({
     required this.isMotionActive,
     required this.isCalibrated,
+    required this.calibrationMessage,
     required this.level,
     required this.settings,
     required this.onChanged,
@@ -1149,6 +1169,7 @@ class _MotionReadinessCard extends StatelessWidget {
 
   final bool isMotionActive;
   final bool isCalibrated;
+  final String? calibrationMessage;
   final SensitivityLevel level;
   final SensitivitySettings settings;
   final ValueChanged<SensitivityLevel> onChanged;
@@ -1183,6 +1204,15 @@ class _MotionReadinessCard extends StatelessWidget {
                 Text(isCalibrated ? 'Calibrated' : 'Not calibrated'),
               ],
             ),
+            if (calibrationMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                calibrationMessage!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             Row(
               children: [

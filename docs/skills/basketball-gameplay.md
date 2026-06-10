@@ -4,6 +4,10 @@
 
 Planned
 
+## Pseudo-3D Render Rework
+
+本階段的視覺重構計畫獨立記錄在 [Basketball Pseudo-3D Render Rework Plan](../basketball-pseudo-3d-render-plan.md)。後續調整籃球拋物線、近大遠小、陰影、籃框遮擋、rim/backboard collision 時，先以該文件作為主要流程。
+
 ## 目的
 
 建立 Phase 7 的 Basketball 模式。玩法參考舊版 Messenger 籃球小遊戲：玩家連續投籃、進球累積分數，達到一定 streak 後籃框開始移動增加難度。Motion Arcade 版本改用手機體感投籃：玩家按住手機畫面準備投籃，做出投籃動作後放開，手機送出 `ShootEvent`，桌面端播放 2D 拋物線與籃框碰撞動畫。
