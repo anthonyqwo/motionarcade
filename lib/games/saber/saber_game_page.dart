@@ -491,14 +491,13 @@ class _ScorePopEffect {
     required this.label,
     required this.color,
     required this.createdAt,
-    this.lifetime = const Duration(milliseconds: 760),
   });
 
   final Offset origin;
   final String label;
   final Color color;
   final DateTime createdAt;
-  final Duration lifetime;
+  final Duration lifetime = const Duration(milliseconds: 760);
 
   bool isAlive(DateTime now) => now.difference(createdAt) < lifetime;
 
