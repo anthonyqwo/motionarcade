@@ -30,6 +30,7 @@ void main() {
 
     test('starts in playing phase when countdown is disabled', () {
       expect(state.phase, BasketballRunPhase.playing);
+      expect(state.remainingSeconds, BasketballGameState.runDurationSeconds);
       expect(state.playerStats.single.score, 0);
       expect(state.playerStats.single.streak, 0);
     });
@@ -149,9 +150,35 @@ void main() {
       state.restartRun();
 
       expect(state.phase, BasketballRunPhase.countdown);
+      expect(state.remainingSeconds, BasketballGameState.runDurationSeconds);
       expect(state.playerStats.single.score, 0);
       expect(state.playerStats.single.bestStreak, 0);
       expect(state.currentBall, isNull);
+    });
+
+    test('ends the run after sixty seconds and rejects more shots', () {
+      _pumpSeconds(state, BasketballGameState.runDurationSeconds);
+
+      expect(state.phase, BasketballRunPhase.gameOver);
+      expect(state.isGameOver, isTrue);
+      expect(state.remainingSeconds, 0);
+      expect(state.playingSeconds, BasketballGameState.runDurationSeconds);
+      expect(state.lastEventLabel, 'Time up');
+
+      state.submitShot(
+        ShootEvent(
+          playerId: 'p1',
+          timestamp: DateTime.fromMillisecondsSinceEpoch(3000),
+          power: 0.65,
+          angle: 45,
+          offset: 0,
+          stability: 1,
+          holdDurationMs: 100,
+        ),
+      );
+
+      expect(state.currentBall, isNull);
+      expect(state.playerStats.single.score, 0);
     });
   });
 }
@@ -171,5 +198,12 @@ void _pumpUntilBallCleared(BasketballGameState state) {
     if (state.currentBall == null) {
       return;
     }
+  }
+}
+
+void _pumpSeconds(BasketballGameState state, double seconds) {
+  final frames = (seconds * 60).ceil();
+  for (var i = 0; i < frames; i++) {
+    state.update(1 / 60, const Size(800, 450));
   }
 }

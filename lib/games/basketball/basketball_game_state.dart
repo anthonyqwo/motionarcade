@@ -10,7 +10,7 @@ import '../../shared/models/player.dart';
 import 'basketball_physics.dart';
 import 'basketball_projection.dart';
 
-enum BasketballRunPhase { countdown, playing }
+enum BasketballRunPhase { countdown, playing, gameOver }
 
 class BasketballPlayerStats {
   const BasketballPlayerStats({
@@ -28,6 +28,8 @@ class BasketballPlayerStats {
   final int bestStreak;
   final int hits;
   final int misses;
+
+  int get attempts => hits + misses;
 }
 
 class BasketballGameState extends ChangeNotifier {
@@ -51,6 +53,7 @@ class BasketballGameState extends ChangeNotifier {
   }
 
   static const double _defaultCountdownSeconds = 3.0;
+  static const double runDurationSeconds = 60.0;
 
   final WebSocketServerService server;
   final List<Player> players;
@@ -79,7 +82,10 @@ class BasketballGameState extends ChangeNotifier {
   BasketballRunPhase get phase => _phase;
   double get countdownRemaining => _countdownRemaining.clamp(0.0, 99.0);
   double get playingSeconds => _playingSeconds;
+  double get remainingSeconds =>
+      (runDurationSeconds - _playingSeconds).clamp(0.0, runDurationSeconds);
   bool get isPlaying => phase == BasketballRunPhase.playing;
+  bool get isGameOver => phase == BasketballRunPhase.gameOver;
   String? get activePlayerId => _activePlayerId;
 
   int get leadingStreak {
@@ -160,17 +166,18 @@ class BasketballGameState extends ChangeNotifier {
     final safeDt = dt.clamp(0.0, 0.05).toDouble();
     _elapsedSeconds += safeDt;
     var needsNotify = false;
+    var playingDt = isPlaying ? safeDt : 0.0;
 
     if (phase == BasketballRunPhase.countdown) {
+      final previousCountdown = countdownRemaining;
       _countdownRemaining -= safeDt;
       if (_countdownRemaining <= 0) {
         _countdownRemaining = 0;
         _phase = BasketballRunPhase.playing;
         lastEventLabel = 'Ready shot';
+        playingDt = math.max(0.0, safeDt - previousCountdown);
       }
       needsNotify = true;
-    } else {
-      _playingSeconds += safeDt;
     }
 
     final ball = currentBall;
@@ -194,6 +201,17 @@ class BasketballGameState extends ChangeNotifier {
       }
     }
 
+    if (playingDt > 0 && isPlaying) {
+      _playingSeconds = math.min(
+        runDurationSeconds,
+        _playingSeconds + playingDt,
+      );
+      needsNotify = true;
+      if (_playingSeconds >= runDurationSeconds - 0.0001) {
+        _finishRun();
+      }
+    }
+
     if (needsNotify) {
       notifyListeners();
     }
@@ -201,6 +219,19 @@ class BasketballGameState extends ChangeNotifier {
 
   void submitShot(ShootEvent event) {
     if (!isPlaying) {
+      if (isGameOver) {
+        server.sendToPlayer(
+          event.playerId,
+          FeedbackEvent(
+            playerId: event.playerId,
+            timestamp: DateTime.now(),
+            result: FeedbackResult.weak,
+            haptic: HapticPattern.light,
+            durationMs: 60,
+            message: 'Time up',
+          ),
+        );
+      }
       return;
     }
     _ensurePlayer(event.playerId);
@@ -251,8 +282,10 @@ class BasketballGameState extends ChangeNotifier {
     } else if (event is ShootEvent) {
       submitShot(event);
     } else if (event is ShootHoldEvent) {
-      lastEventLabel = event.pressed ? 'Aiming' : 'Released';
-      notifyListeners();
+      if (isPlaying) {
+        lastEventLabel = event.pressed ? 'Aiming' : 'Released';
+        notifyListeners();
+      }
     }
   }
 
@@ -348,6 +381,35 @@ class BasketballGameState extends ChangeNotifier {
         message: lastEventLabel,
       ),
     );
+  }
+
+  void _finishRun() {
+    if (isGameOver) {
+      return;
+    }
+    currentBall = null;
+    _activePlayerId = null;
+    _phase = BasketballRunPhase.gameOver;
+    _playingSeconds = runDurationSeconds;
+    lastOutcome = BasketballShotOutcome.inFlight;
+    lastMissType = null;
+    lastEventLabel = 'Time up';
+
+    for (final player in players) {
+      if (player.status == PlayerConnectionStatus.connected) {
+        server.sendToPlayer(
+          player.id,
+          FeedbackEvent(
+            playerId: player.id,
+            timestamp: DateTime.now(),
+            result: FeedbackResult.good,
+            haptic: HapticPattern.medium,
+            durationMs: 120,
+            message: 'Time up',
+          ),
+        );
+      }
+    }
   }
 
   void _ensurePlayer(String playerId) {

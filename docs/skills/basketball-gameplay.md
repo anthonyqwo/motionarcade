@@ -23,18 +23,20 @@ Phase 7
 ```text
 Lobby 選 Basketball
 → 3 秒倒數
-→ Ready Shot
+→ Ready Shot，60 秒計時開始
 → 手機按住 + 做投籃動作 + 放開
 → ShootEvent 送到 host
 → 桌面播放球路與籃框碰撞
 → 進球：score +1，streak +1，更新難度
 → 沒進：streak 歸零，保留 best score / best streak
 → 下一球
+→ 60 秒到：停止接新投籃，roomPhase = gameOver
+→ 桌面顯示結算：winner、score、time、排行榜、FG、best streak
 → Restart：清空本輪 score / streak / ball state
 → Back to room：回 lobby
 ```
 
-第一版不使用 60 秒限時。先做無限連續投籃挑戰，讓玩家追求最高 streak。限時模式保留為後續擴充。
+第一版使用 60 秒限時挑戰。玩家在時間內盡量投進更多球；時間到後進入 `gameOver`，手機端可看到結算狀態並可送出 Restart。
 
 ## 難度曲線
 
@@ -529,7 +531,7 @@ Basketball selected 時，Controller Home 額外顯示投籃 pad。
 
 ## 後續擴充
 
-- 60 秒限時模式。
+- 自訂限時長度。
 - 三分線 / 遠距離模式。
 - 風向或移動出手點。
 - 連進加倍得分。
