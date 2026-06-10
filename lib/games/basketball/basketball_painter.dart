@@ -11,10 +11,19 @@ class BasketballPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final ball = state.currentBall;
+    final ballIsBehindHoop = ball != null && ball.velocity.dy < 0;
+
     _drawBackground(canvas, size);
-    _drawHoop(canvas, state.currentHoop);
-    _drawTrail(canvas, state.currentBall);
-    _drawBall(canvas, state.currentBall, size);
+    if (ballIsBehindHoop) {
+      _drawTrail(canvas, ball);
+      _drawBall(canvas, ball, size);
+      _drawHoop(canvas, state.currentHoop);
+    } else {
+      _drawHoop(canvas, state.currentHoop);
+      _drawTrail(canvas, ball);
+      _drawBall(canvas, ball, size);
+    }
   }
 
   void _drawBackground(Canvas canvas, Size size) {

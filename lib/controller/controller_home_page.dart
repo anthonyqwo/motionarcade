@@ -410,15 +410,17 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
       return;
     }
     if (!_isMotionActive) {
-      setState(() => _errorMessage = 'Start motion before shooting.');
-      return;
+      _motionSensorService.start();
+      _fusedMotionService.start();
     }
 
     final now = DateTime.now();
     setState(() {
       _isShotHolding = true;
       _shotHoldStartedAt = now;
-      _lastShotStatus = 'Release to shoot';
+      _lastShotStatus = _isMotionActive
+          ? 'Release to shoot'
+          : 'Starting motion';
       _errorMessage = null;
     });
     _send(
@@ -652,7 +654,7 @@ class _ControllerHomePageState extends State<ControllerHomePage> {
                   if (_isBasketballSelected) ...[
                     const SizedBox(height: 12),
                     _BasketballShotPad(
-                      isEnabled: isConnected && _isMotionActive,
+                      isEnabled: isConnected,
                       isHolding: _isShotHolding,
                       lastStatus: _lastShotStatus,
                       lastShot: _lastShotEvent,

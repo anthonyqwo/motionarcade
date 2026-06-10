@@ -71,7 +71,7 @@ class ShootDetector {
     );
     final angle = (angleRadians * 180 / math.pi).clamp(32.0, 62.0).toDouble();
     final offset =
-        (features.lateralDrift / (features.upwardEnergy + 0.0001) * 2.2)
+        (features.lateralDrift / (features.upwardEnergy + 0.0001) * 1.35)
             .clamp(-1.0, 1.0)
             .toDouble();
 

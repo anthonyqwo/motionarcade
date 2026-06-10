@@ -217,7 +217,7 @@ class BasketballPhysics {
     return BasketballBall(
       position: start,
       velocity: Offset(
-        lateral * 340 * scaleX,
+        lateral * 250 * scaleX,
         -_lerp(720, 1040, mappedPower) * arc * scaleY,
       ),
       radius: 16 * math.min(scaleX, scaleY).clamp(0.75, 1.35),
@@ -249,10 +249,12 @@ class BasketballPhysics {
     }
 
     var collision = BasketballCollisionType.none;
-    if (_resolveRimCollision(ball, hoop.leftRimCenter, hoop.rimRadius) ||
-        _resolveRimCollision(ball, hoop.rightRimCenter, hoop.rimRadius)) {
-      collision = BasketballCollisionType.rim;
-      ball.lastCollision = BasketballCollisionType.rim;
+    if (_canResolveRimCollision(ball)) {
+      if (_resolveRimCollision(ball, hoop.leftRimCenter, hoop.rimRadius) ||
+          _resolveRimCollision(ball, hoop.rightRimCenter, hoop.rimRadius)) {
+        collision = BasketballCollisionType.rim;
+        ball.lastCollision = BasketballCollisionType.rim;
+      }
     }
 
     if (_resolveBackboardCollision(ball, hoop.backboardRect)) {
@@ -284,6 +286,10 @@ class BasketballPhysics {
   bool _isInsideScoreWindow(BasketballBall ball, BasketballHoop hoop) {
     final effectiveHalfWidth = (hoop.rimWidth / 2) * hoop.hitTolerance;
     return (ball.position.dx - hoop.rimCenter.dx).abs() <= effectiveHalfWidth;
+  }
+
+  bool _canResolveRimCollision(BasketballBall ball) {
+    return ball.velocity.dy >= 0;
   }
 
   bool _resolveRimCollision(

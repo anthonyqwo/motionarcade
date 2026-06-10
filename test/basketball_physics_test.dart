@@ -43,6 +43,20 @@ void main() {
       expect(ball.collisionCount, 1);
     });
 
+    test('does not bounce from rim while rising under the basket', () {
+      final hoop = hoopFor();
+      final ball = BasketballBall(
+        position: hoop.leftRimCenter.translate(0, 10),
+        velocity: const Offset(0, -180),
+      );
+
+      final result = physics.step(ball, hoop, arena, 0);
+
+      expect(result.collision, BasketballCollisionType.none);
+      expect(ball.velocity.dy, lessThan(0));
+      expect(ball.collisionCount, 0);
+    });
+
     test('bounces from backboard collision', () {
       final hoop = hoopFor();
       final ball = BasketballBall(
