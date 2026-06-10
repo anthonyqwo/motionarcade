@@ -7,6 +7,7 @@ import '../../shared/visual/particle_system.dart';
 import '../../shared/visual/screen_shake_controller.dart';
 import '../../shared/visual/trail_renderer.dart';
 import 'saber_target.dart';
+import 'saber_visual_style.dart';
 
 class SaberPainter extends CustomPainter {
   SaberPainter({
@@ -189,7 +190,7 @@ class SaberPainter extends CustomPainter {
       final boxSize = 44.0 * scale * _statusScaleFor(target);
       final targetOpacity = opacity * _statusOpacityFor(target);
 
-      final Color baseColor = _colorForDirection(target.direction);
+      final Color baseColor = saberColorForDirection(target.direction);
 
       if (target.isMissed) {
         _paintMissedTarget(
@@ -521,21 +522,6 @@ class SaberPainter extends CustomPainter {
         );
     }
     canvas.drawPath(path, paint);
-  }
-
-  Color _colorForDirection(MotionDirection direction) {
-    switch (direction) {
-      case MotionDirection.up || MotionDirection.down:
-        return const Color(0xFF22D3EE); // Neon Cyan
-      case MotionDirection.left:
-        return const Color(0xFFF97316); // Neon Orange
-      case MotionDirection.right:
-        return const Color(0xFFA3E635); // Neon Lime
-      case MotionDirection.forward:
-        return const Color(0xFF22C55E);
-      case MotionDirection.backward:
-        return const Color(0xFFFF4EBD);
-    }
   }
 
   void _paintSwordTipIndicator(Canvas canvas, Size size) {

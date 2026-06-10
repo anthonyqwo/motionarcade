@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:motionarcade/games/saber/saber_game_state.dart';
 import 'package:motionarcade/games/saber/saber_target.dart';
+import 'package:motionarcade/games/saber/saber_visual_style.dart';
 import 'package:motionarcade/network/websocket_server_service.dart';
 import 'package:motionarcade/shared/models/motion_event.dart';
 import 'package:motionarcade/shared/models/player.dart';
@@ -179,7 +181,33 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(state.lastSlash, matchingSlash);
+      expect(state.lastHitEffect, isNotNull);
+      expect(state.lastHitEffect!.targetDirection, MotionDirection.up);
+      expect(state.lastHitEffect!.result, FeedbackResult.good);
+      expect(state.lastHitEffect!.addedScore, 60);
     });
+
+    test(
+      'saber visual style keeps effect colors aligned with target colors',
+      () {
+        expect(
+          saberColorForDirection(MotionDirection.left),
+          const Color(0xFFF97316),
+        );
+        expect(
+          saberColorForDirection(MotionDirection.right),
+          const Color(0xFFA3E635),
+        );
+        expect(
+          saberScoreLabel(result: FeedbackResult.perfect, addedScore: 500),
+          'PERFECT +500',
+        );
+        expect(
+          saberScoreColorForResult(FeedbackResult.perfect),
+          isNot(saberScoreColorForResult(FeedbackResult.good)),
+        );
+      },
+    );
 
     test('countdown delays spawning and starts the run cleanly', () {
       final state = SaberGameState(
@@ -316,6 +344,8 @@ void main() {
       expect(state.scoringForPlayer('p2').score, greaterThan(0));
       expect(state.playerStats.first.player.id, equals('p2'));
       expect(state.playerStats.first.hits, equals(1));
+      expect(state.lastHitEffect?.result, FeedbackResult.perfect);
+      expect(state.lastHitEffect?.targetDirection, MotionDirection.up);
     });
   });
 }

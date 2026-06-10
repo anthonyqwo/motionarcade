@@ -14,6 +14,22 @@ enum SaberRunPhase { countdown, playing, gameOver }
 
 enum SaberGameOverReason { outOfLives }
 
+class SaberHitEffect {
+  const SaberHitEffect({
+    required this.slash,
+    required this.targetId,
+    required this.targetDirection,
+    required this.result,
+    required this.addedScore,
+  });
+
+  final SlashEvent slash;
+  final String targetId;
+  final MotionDirection targetDirection;
+  final FeedbackResult result;
+  final int addedScore;
+}
+
 class SaberPlayerStats {
   const SaberPlayerStats({
     required this.player,
@@ -96,6 +112,7 @@ class SaberGameState extends ChangeNotifier {
   int? _teamMisses;
 
   SlashEvent? lastSlash;
+  SaberHitEffect? lastHitEffect;
   String lastEventLabel = 'none';
   List<TrailRenderPoint> get trailPoints => _trailBuffer.points;
   SaberRunPhase get phase => _phase ?? SaberRunPhase.playing;
@@ -153,6 +170,7 @@ class SaberGameState extends ChangeNotifier {
         ? SaberRunPhase.countdown
         : SaberRunPhase.playing;
     lastSlash = null;
+    lastHitEffect = null;
     lastEventLabel = 'restart';
     notifyListeners();
   }
@@ -354,7 +372,14 @@ class SaberGameState extends ChangeNotifier {
           _ => math.pi / 4,
         };
 
-        scoringForPlayer(event.playerId).registerHit(rating);
+        final addedScore = scoringForPlayer(event.playerId).registerHit(rating);
+        lastHitEffect = SaberHitEffect(
+          slash: event,
+          targetId: closestTarget.id,
+          targetDirection: closestTarget.direction,
+          result: rating,
+          addedScore: addedScore,
+        );
         _hitsByPlayer[event.playerId] =
             (_hitsByPlayer[event.playerId] ?? 0) + 1;
 

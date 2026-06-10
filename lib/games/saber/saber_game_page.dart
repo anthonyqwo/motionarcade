@@ -10,6 +10,7 @@ import '../../shared/visual/screen_shake_controller.dart';
 import '../../shared/visual/trail_impact_locator.dart';
 import 'saber_game_state.dart';
 import 'saber_painter.dart';
+import 'saber_visual_style.dart';
 
 class SaberGamePage extends StatefulWidget {
   const SaberGamePage({
@@ -36,7 +37,8 @@ class _SaberGamePageState extends State<SaberGamePage>
 
   final ScreenShakeController _shakeController = ScreenShakeController();
   final List<Particle> _particles = [];
-  SlashEvent? _lastSlashSeen;
+  final List<_ScorePopEffect> _scorePops = [];
+  SaberHitEffect? _lastHitEffectSeen;
   final ValueNotifier<DateTime> _frameClock = ValueNotifier<DateTime>(
     DateTime.now(),
   );
@@ -67,6 +69,7 @@ class _SaberGamePageState extends State<SaberGamePage>
       _state.update(dt);
       final now = DateTime.now();
       _particles.removeWhere((p) => !p.isAlive(now));
+      _scorePops.removeWhere((effect) => !effect.isAlive(now));
       _frameClock.value = now;
     });
     _ticker.start();
@@ -84,34 +87,45 @@ class _SaberGamePageState extends State<SaberGamePage>
   }
 
   void _onStateChange() {
-    if (_state.lastSlash != _lastSlashSeen && _state.lastSlash != null) {
-      _lastSlashSeen = _state.lastSlash;
+    final hitEffect = _state.lastHitEffect;
+    if (hitEffect != null && hitEffect != _lastHitEffectSeen) {
+      _lastHitEffectSeen = hitEffect;
+      final slash = hitEffect.slash;
 
       _shakeController.trigger(
-        intensity: 8.0 + _lastSlashSeen!.power * 12.0,
+        intensity: 8.0 + slash.power * 12.0,
         duration: const Duration(milliseconds: 250),
       );
 
       final origin = const TrailImpactLocator().locate(
-        slash: _lastSlashSeen!,
+        slash: slash,
         points: _state.trailPoints,
         size: _arenaSize,
       );
 
-      final isForward = _lastSlashSeen!.direction == MotionDirection.forward;
-      final color = isForward
-          ? const Color(0xFF22C55E)
-          : const Color(0xFFFF4EBD);
+      final color = saberColorForDirection(hitEffect.targetDirection);
 
+      final now = DateTime.now();
       final burst = const ParticleBurstFactory().createBurst(
         origin: origin,
-        now: DateTime.now(),
+        now: now,
         color: color,
         count: 24,
-        speed: 55.0 + _lastSlashSeen!.power * 35.0,
+        speed: 55.0 + slash.power * 35.0,
       );
       _particles.addAll(burst);
-      _frameClock.value = DateTime.now();
+      _scorePops.add(
+        _ScorePopEffect(
+          origin: origin,
+          label: saberScoreLabel(
+            result: hitEffect.result,
+            addedScore: hitEffect.addedScore,
+          ),
+          color: saberScoreColorForResult(hitEffect.result),
+          createdAt: now,
+        ),
+      );
+      _frameClock.value = now;
     }
     if (mounted) {
       setState(() {});
@@ -121,7 +135,8 @@ class _SaberGamePageState extends State<SaberGamePage>
 
   void _restartRun() {
     _particles.clear();
-    _lastSlashSeen = null;
+    _scorePops.clear();
+    _lastHitEffectSeen = null;
     _resetNextTick = true;
     _state.restartRun();
     _frameClock.value = DateTime.now();
@@ -300,6 +315,16 @@ class _SaberGamePageState extends State<SaberGamePage>
                                 ),
                               ),
                             ),
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _ScorePopPainter(
+                                    effects: _scorePops,
+                                    frameClock: _frameClock,
+                                  ),
+                                ),
+                              ),
+                            ),
                             if (_state.phase == SaberRunPhase.countdown)
                               _CountdownOverlay(
                                 countdown: _state.countdownRemaining,
@@ -458,6 +483,94 @@ String _formatDuration(double seconds) {
   final minutes = wholeSeconds ~/ 60;
   final remainingSeconds = wholeSeconds % 60;
   return '$minutes:${remainingSeconds.toString().padLeft(2, '0')}';
+}
+
+class _ScorePopEffect {
+  const _ScorePopEffect({
+    required this.origin,
+    required this.label,
+    required this.color,
+    required this.createdAt,
+    this.lifetime = const Duration(milliseconds: 760),
+  });
+
+  final Offset origin;
+  final String label;
+  final Color color;
+  final DateTime createdAt;
+  final Duration lifetime;
+
+  bool isAlive(DateTime now) => now.difference(createdAt) < lifetime;
+
+  double progress(DateTime now) {
+    return (now.difference(createdAt).inMilliseconds / lifetime.inMilliseconds)
+        .clamp(0.0, 1.0)
+        .toDouble();
+  }
+
+  Offset positionAt(DateTime now) {
+    final t = progress(now);
+    return origin - Offset(0, 46 * t);
+  }
+
+  double opacityAt(DateTime now) {
+    final t = progress(now);
+    if (t < 0.18) {
+      return (t / 0.18).clamp(0.0, 1.0).toDouble();
+    }
+    return (1 - (t - 0.18) / 0.82).clamp(0.0, 1.0).toDouble();
+  }
+}
+
+class _ScorePopPainter extends CustomPainter {
+  _ScorePopPainter({required this.effects, required this.frameClock})
+    : super(repaint: frameClock);
+
+  final List<_ScorePopEffect> effects;
+  final ValueNotifier<DateTime> frameClock;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final now = frameClock.value;
+    for (final effect in effects) {
+      if (!effect.isAlive(now)) {
+        continue;
+      }
+      final opacity = effect.opacityAt(now);
+      final progress = effect.progress(now);
+      final position = effect.positionAt(now);
+      final fontSize = 17.0 + (1 - progress) * 5.0;
+      final glowColor = effect.color.withValues(alpha: opacity * 0.8);
+
+      final painter = TextPainter(
+        text: TextSpan(
+          text: effect.label,
+          style: TextStyle(
+            color: effect.color.withValues(alpha: opacity),
+            fontSize: fontSize,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.0,
+            shadows: [
+              Shadow(color: glowColor, blurRadius: 14),
+              Shadow(color: Colors.black.withValues(alpha: opacity * 0.72)),
+            ],
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: size.width * 0.56);
+
+      painter.paint(
+        canvas,
+        position - Offset(painter.width / 2, painter.height / 2),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScorePopPainter oldDelegate) {
+    return oldDelegate.effects != effects ||
+        oldDelegate.frameClock != frameClock;
+  }
 }
 
 class _PillBadge extends StatelessWidget {
