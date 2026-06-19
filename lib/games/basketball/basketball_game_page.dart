@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import '../../network/websocket_server_service.dart';
 import '../../shared/models/motion_event.dart';
 import '../../shared/models/player.dart';
+import '../../shared/feedback/audio_service.dart';
 import 'basketball_game_state.dart';
 import 'basketball_painter.dart';
 import 'basketball_physics.dart';
@@ -37,6 +39,12 @@ class _BasketballGamePageState extends State<BasketballGamePage>
   bool _resetNextTick = false;
   DateTime? _lastRoomStateBroadcastAt;
 
+  ShootEvent? _lastShotSeen;
+  BasketballShotOutcome _lastOutcomeSeen = BasketballShotOutcome.inFlight;
+  int _lastCollisionCountSeen = 0;
+  bool _wasGameOverSeen = false;
+  bool _alternatePitch = false;
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +68,8 @@ class _BasketballGamePageState extends State<BasketballGamePage>
     });
     _ticker.start();
     _broadcastRoomState(force: true);
+
+    unawaited(AudioService().playSFX('audio/sfx_countdown.wav'));
   }
 
   @override
@@ -73,6 +83,43 @@ class _BasketballGamePageState extends State<BasketballGamePage>
   }
 
   void _onStateChange() {
+    final ball = _state.currentBall;
+    if (ball != null) {
+      if (ball.collisionCount > _lastCollisionCountSeen) {
+        _lastCollisionCountSeen = ball.collisionCount;
+        // Alternate pitch for successive collisions + small random variance (±0.02)
+        _alternatePitch = !_alternatePitch;
+        final basePitch = _alternatePitch ? 1.06 : 0.94;
+        final finalPitch = basePitch + (math.Random().nextDouble() * 0.04 - 0.02);
+        if (ball.lastCollision == BasketballCollisionType.rim) {
+          unawaited(AudioService().playSFX('audio/sfx_basketball_rim.wav', pitch: finalPitch));
+        } else if (ball.lastCollision == BasketballCollisionType.backboard) {
+          unawaited(AudioService().playSFX('audio/sfx_basketball_backboard.wav', pitch: finalPitch));
+        }
+      }
+    } else {
+      _lastCollisionCountSeen = 0;
+    }
+
+    final shot = _state.lastShot;
+    if (shot != null && shot != _lastShotSeen) {
+      _lastShotSeen = shot;
+      unawaited(AudioService().playSFX('audio/sfx_basketball_shoot.wav'));
+    }
+
+    if (_state.lastOutcome != _lastOutcomeSeen) {
+      _lastOutcomeSeen = _state.lastOutcome;
+      if (_state.lastOutcome == BasketballShotOutcome.scored) {
+        // Keep swish at 1.0 pitch so the scoring splash/friction sounds natural and clear
+        unawaited(AudioService().playSFX('audio/sfx_basketball_swish.wav', pitch: 1.0));
+      }
+    }
+
+    if (_state.isGameOver && !_wasGameOverSeen) {
+      _wasGameOverSeen = true;
+      unawaited(AudioService().playSFX('audio/sfx_saber_miss.wav'));
+    }
+
     if (mounted) {
       setState(() {});
     }
@@ -84,10 +131,15 @@ class _BasketballGamePageState extends State<BasketballGamePage>
   }
 
   void _restartRun() {
+    _lastShotSeen = null;
+    _lastOutcomeSeen = BasketballShotOutcome.inFlight;
+    _lastCollisionCountSeen = 0;
+    _wasGameOverSeen = false;
     _resetNextTick = true;
     _state.restartRun();
     _frameClock.value = DateTime.now();
     _broadcastRoomState(force: true, message: 'Basketball restarted.');
+    unawaited(AudioService().playSFX('audio/sfx_countdown.wav'));
   }
 
   void _handleCommandEvent(MotionEvent event) {

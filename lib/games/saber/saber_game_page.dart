@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -8,6 +9,7 @@ import '../../shared/models/player.dart';
 import '../../shared/visual/particle_system.dart';
 import '../../shared/visual/screen_shake_controller.dart';
 import '../../shared/visual/trail_impact_locator.dart';
+import '../../shared/feedback/audio_service.dart';
 import 'saber_game_state.dart';
 import 'saber_painter.dart';
 import 'saber_visual_style.dart';
@@ -39,6 +41,12 @@ class _SaberGamePageState extends State<SaberGamePage>
   final List<Particle> _particles = [];
   final List<_ScorePopEffect> _scorePops = [];
   SaberHitEffect? _lastHitEffectSeen;
+  SlashEvent? _lastSlashSeen;
+  int _lastTeamMissesSeen = 0;
+  bool _wasGameOverSeen = false;
+  int _lastComboSeen = 0;
+  bool _alternatePitch = false;
+
   final ValueNotifier<DateTime> _frameClock = ValueNotifier<DateTime>(
     DateTime.now(),
   );
@@ -74,6 +82,8 @@ class _SaberGamePageState extends State<SaberGamePage>
     });
     _ticker.start();
     _broadcastRoomState(force: true);
+
+    unawaited(AudioService().playSFX('audio/sfx_countdown.wav'));
   }
 
   @override
@@ -126,7 +136,46 @@ class _SaberGamePageState extends State<SaberGamePage>
         ),
       );
       _frameClock.value = now;
+
+      if (hitEffect.result == FeedbackResult.perfect) {
+        // Keep perfect hit at 1.0 pitch so the chime sound is crisp and clean
+        unawaited(AudioService().playSFX('audio/sfx_saber_perfect.wav', pitch: 1.0));
+      } else {
+        // Alternate pitch for consecutive regular hits (high/low steps) + small random variance (±0.03)
+        // This is a classic game audio technique to avoid robotic repetition ("machine gun effect")
+        _alternatePitch = !_alternatePitch;
+        final basePitch = _alternatePitch ? 1.06 : 0.94;
+        final finalPitch = basePitch + (math.Random().nextDouble() * 0.06 - 0.03);
+        unawaited(AudioService().playSFX('audio/sfx_saber_hit.wav', pitch: finalPitch));
+      }
     }
+
+    final slash = _state.lastSlash;
+    if (slash != null && slash != _lastSlashSeen) {
+      _lastSlashSeen = slash;
+      unawaited(AudioService().playSFX('audio/sfx_saber_swing.wav'));
+    }
+
+    if (_state.teamMisses > _lastTeamMissesSeen) {
+      _lastTeamMissesSeen = _state.teamMisses;
+      unawaited(AudioService().playSFX('audio/sfx_saber_miss.wav'));
+    }
+
+    if (_state.isGameOver && !_wasGameOverSeen) {
+      _wasGameOverSeen = true;
+      unawaited(AudioService().playSFX('audio/sfx_saber_miss.wav'));
+    }
+
+    final leaderboard = _state.playerStats;
+    final topStats = leaderboard.isEmpty ? null : leaderboard.first;
+    final combo = topStats?.combo ?? _state.scoring.combo;
+    if (combo > 0 && combo % 10 == 0 && combo > _lastComboSeen) {
+      _lastComboSeen = combo;
+      unawaited(AudioService().playSFX('audio/sfx_saber_perfect.wav'));
+    } else if (combo < _lastComboSeen) {
+      _lastComboSeen = combo;
+    }
+
     if (mounted) {
       setState(() {});
     }
@@ -137,10 +186,15 @@ class _SaberGamePageState extends State<SaberGamePage>
     _particles.clear();
     _scorePops.clear();
     _lastHitEffectSeen = null;
+    _lastSlashSeen = null;
+    _lastTeamMissesSeen = 0;
+    _wasGameOverSeen = false;
+    _lastComboSeen = 0;
     _resetNextTick = true;
     _state.restartRun();
     _frameClock.value = DateTime.now();
     _broadcastRoomState(force: true);
+    unawaited(AudioService().playSFX('audio/sfx_countdown.wav'));
   }
 
   void _handleCommandEvent(MotionEvent event) {

@@ -16,6 +16,7 @@ import '../shared/visual/trail_renderer.dart';
 import '../games/basketball/basketball_game_page.dart';
 import 'game_shell_page.dart';
 import '../games/saber/saber_game_page.dart';
+import '../shared/feedback/audio_service.dart';
 
 class RoomPage extends StatefulWidget {
   const RoomPage({super.key, this.server});
@@ -114,10 +115,13 @@ class _RoomPageState extends State<RoomPage> {
         _lastTrailSamplesReceived = _trailSamplesReceived;
       });
     });
+
+    unawaited(AudioService().playBGM('audio/bgm_lobby.wav'));
   }
 
   @override
   void dispose() {
+    unawaited(AudioService().stopBGM());
     _targetDirectionTimer?.cancel();
     _trailPruneTimer?.cancel();
     _trailStatsTimer?.cancel();
@@ -243,6 +247,8 @@ class _RoomPageState extends State<RoomPage> {
     _sendTransportConfig(event.playerId);
     _sendRoomStateToPlayer(event.playerId);
     _broadcastRoomState();
+
+    unawaited(AudioService().playSFX('audio/sfx_click.wav'));
   }
 
   int get _connectedPlayersCount => _players
@@ -387,6 +393,8 @@ class _RoomPageState extends State<RoomPage> {
     _eventSubscription = null;
     _udpEventSubscription = null;
 
+    unawaited(AudioService().stopBGM());
+
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
@@ -421,6 +429,7 @@ class _RoomPageState extends State<RoomPage> {
             });
           });
           _broadcastRoomState(message: 'Back in room.');
+          unawaited(AudioService().playBGM('audio/bgm_lobby.wav'));
         });
   }
 
